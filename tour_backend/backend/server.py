@@ -59,7 +59,7 @@ def echo(audio):
         full_response = ""
 
         response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo", messages=messages, max_tokens=200, stream=True
+            model="gpt-4o-mini", messages=messages, max_tokens=200, stream=True
         )
 
         for chunk in response:

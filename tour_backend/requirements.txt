@@ -1,5 +1,5 @@
 openai
 fastapi
 python-dotenv
-elevenlabs
+elevenlabs>=1.0,<2.0
 fastrtc[vad, stt, tts]
