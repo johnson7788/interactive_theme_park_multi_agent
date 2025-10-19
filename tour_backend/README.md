@@ -92,3 +92,4 @@ cp env_template .env
 * 降低 `threshold` 值
 * 减小 `started_talking_threshold`
 
+## 实际测试发现，延迟太高了
