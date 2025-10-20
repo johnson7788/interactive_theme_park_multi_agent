@@ -23,3 +23,14 @@ GLM(Agent) 实现方式：Google ADK, LangGraph React Agent, Openai Agents. 实�
 2. 用户绑定角色 --- 自动初始化多个Agent -- 开始工作
 3. 换一个地方打卡时 ---根据用户的id ---连接初始化后的Agent
 4. 用户结束或者长时间不用，销毁Agent(线程关掉了)
+
+## 实现思路
+### 这是FastRTC的实现，但是很卡，不知道为什么
+[backend](tour_backend/backend)
+[frontend](tour_backend/frontend)
+
+
+### 参考小智
+小智的客户端和服务端。
+https://github.com/78/xiaozhi-esp32
+![xiaozhi.png](doc/xiaozhi.png)
