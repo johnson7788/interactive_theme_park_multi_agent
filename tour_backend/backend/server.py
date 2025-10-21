@@ -11,8 +11,10 @@ from elevenlabs.client import ElevenLabs
 import numpy as np
 from dotenv import load_dotenv
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+DOUBAO_API_KEY = os.getenv("DOUBAO_API_KEY")
+GLM_API_KEY = os.getenv("GLM_API_KEY")
 
 
 sys_prompt = """
@@ -23,7 +25,7 @@ Begin a conversation with a self-deprecating joke like 'I'm not sure if I'm read
 
 messages = [{"role": "system", "content": sys_prompt}]
 
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+openai_client = OpenAI(api_key=GLM_API_KEY)
 
 elevenlabs_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
@@ -34,7 +36,7 @@ def echo(audio):
     stt_time = time.time()
 
     logging.info("Performing STT")
-
+    # 声音转文本
     transcription = elevenlabs_client.speech_to_text.convert(
         file=audio_to_bytes(audio),
         model_id="scribe_v1",
@@ -57,7 +59,7 @@ def echo(audio):
     def text_stream():
         global full_response
         full_response = ""
-
+        # 得到回答
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini", messages=messages, max_tokens=200, stream=True
         )
@@ -68,7 +70,7 @@ def echo(audio):
             if chunk.choices[0].delta.content:
                 full_response += chunk.choices[0].delta.content
                 yield chunk.choices[0].delta.content
-
+    # 逐个字生成语音流
     audio_stream = elevenlabs_client.generate(
         text=text_stream(),
         voice="Rachel",  # Cassidy is also really good
@@ -79,7 +81,7 @@ def echo(audio):
         output_format="pcm_24000",
         stream=True,
     )
-
+    # 生成1个语音，就返回1个
     for audio_chunk in audio_stream:
         audio_array = audio_to_float32(
             np.frombuffer(audio_chunk, dtype=np.int16)
