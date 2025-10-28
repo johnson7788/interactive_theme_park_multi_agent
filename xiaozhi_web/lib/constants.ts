@@ -1,0 +1,24 @@
+export enum DeviceState {
+  IDLE = 'IDLE',
+  LISTENING = 'LISTENING',
+  SPEAKING = 'SPEAKING',
+}
+
+export enum ListeningMode {
+  REALTIME = 'REALTIME',
+  AUTO_STOP = 'AUTO_STOP',
+  MANUAL = 'MANUAL',
+}
+
+export enum AbortReason {
+  WAKE_WORD_DETECTED = 'WAKE_WORD_DETECTED',
+  USER_INTERRUPTED = 'USER_INTERRUPTED',
+}
+
+export const AudioConfig = {
+  OUTPUT_SAMPLE_RATE: 24000,
+  INPUT_SAMPLE_RATE: 16000,
+  CHANNELS: 1,
+  FRAME_DURATION: 20,
+  BYTES_PER_SAMPLE: 2,
+};
