@@ -41,5 +41,17 @@ https://github.com/huangjunsen0406/py-xiaozhi
 https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt
 放到tour_backend/models/SenseVoiceSmall/model.pt
 
-配置文件
+修改配置文件
+```
 tour_backend/data/.config.yaml
+```
+
+## 配置和启动
+```
+查看：
+cd tour_backend
+python3 -m pip install -r requirements.txt
+python3 app.py
+
+浏览器打开： tour_backend/test/test_page.html
+```
