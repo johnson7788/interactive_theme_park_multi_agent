@@ -40,3 +40,6 @@ https://github.com/huangjunsen0406/py-xiaozhi
 ## SenseVoice模型下载:
 https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt
 放到tour_backend/models/SenseVoiceSmall/model.pt
+
+配置文件
+tour_backend/data/.config.yaml
