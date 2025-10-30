@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models import Setting, TaskTemplate, TaskType
-from app.schemas import TaskTemplateOut
+from ..models import Setting, TaskTemplate, TaskType
+from ..schemas import TaskTemplateOut
 
 # 如需接入 OpenAI，请取消注释以下内容并在 .env 配置 OPENAI_API_KEY
 # from openai import OpenAI

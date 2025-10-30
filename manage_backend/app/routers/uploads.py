@@ -1,8 +1,8 @@
 import os
 from uuid import uuid4
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
-from app.config import settings
-from app.deps import get_current_admin
+from ..config import settings
+from ..deps import get_current_admin
 
 router = APIRouter(tags=["uploads"], prefix="/uploads")
 

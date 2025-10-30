@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, List, Any
 from pydantic import BaseModel, ConfigDict, Field
-from app.models import Role, GameStatus, Tone, TaskType, ProgressStatus, RewardType
+from .models import Role, GameStatus, Tone, TaskType, ProgressStatus, RewardType
 
 
 # ===== Common =====

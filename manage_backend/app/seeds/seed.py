@@ -1,9 +1,9 @@
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.db import AsyncSessionLocal
-from app.models import AdminUser, Player, GameTheme, NPC, TaskTemplate, TaskType
-from app.utils.security import hash_password
+from ..db import AsyncSessionLocal
+from ..models import AdminUser, Player, GameTheme, NPC, TaskTemplate, TaskType
+from ..utils.security import hash_password
 
 
 async def seed():

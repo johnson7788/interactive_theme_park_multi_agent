@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from app.db import get_session
-from app.schemas import PlayerOut, PlayerDetailOut, Page, PageMeta
-from app.models import Player, UserTaskProgress, ProgressStatus, UserReward
-from app.deps import get_current_admin
+from ..db import get_session
+from ..schemas import PlayerOut, PlayerDetailOut, Page, PageMeta
+from ..models import Player, UserTaskProgress, ProgressStatus, UserReward
+from ..deps import get_current_admin
 
 router = APIRouter(tags=["users"], prefix="/users")
 

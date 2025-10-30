@@ -7,7 +7,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.mysql import JSON as MySQLJSON
-from app.db import Base
+from .db import Base
 
 
 class TimestampMixin:

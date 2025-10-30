@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from app.db import get_session
-from app.schemas import TaskTemplateCreate, TaskTemplateUpdate, TaskTemplateOut, Page, PageMeta
-from app.models import TaskTemplate, TaskType
-from app.deps import get_current_admin
+from ..db import get_session
+from ..schemas import TaskTemplateCreate, TaskTemplateUpdate, TaskTemplateOut, Page, PageMeta
+from ..models import TaskTemplate, TaskType
+from ..deps import get_current_admin
 
 router = APIRouter(tags=["tasks"], prefix="/task")
 

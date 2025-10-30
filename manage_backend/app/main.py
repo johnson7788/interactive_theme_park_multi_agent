@@ -4,11 +4,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.config import settings
-from app.db import engine, Base, AsyncSessionLocal
-from app.routers import auth, themes, npcs, agent, tasks, checkpoints, users, rewards, stats, settings as settings_router, uploads
-from app.routers import api_router
-from app.models import AuditLog, AdminUser
+from .config import settings
+from .db import engine, Base, AsyncSessionLocal
+from .routers import auth, themes, npcs, agent, tasks, checkpoints, users, rewards, stats, settings as settings_router, uploads
+from .routers import api_router
+from .models import AuditLog, AdminUser
 
 app = FastAPI(title=settings.app_name, debug=settings.app_debug)
 

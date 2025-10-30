@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.db import get_session
-from app.schemas import RewardRuleCreate, RewardRuleUpdate, RewardRuleOut, Page, PageMeta
-from app.models import RewardRule
-from app.deps import get_current_admin
+from ..db import get_session
+from ..schemas import RewardRuleCreate, RewardRuleUpdate, RewardRuleOut, Page, PageMeta
+from ..models import RewardRule
+from ..deps import get_current_admin
 
 router = APIRouter(tags=["rewards"], prefix="/rewards")
 

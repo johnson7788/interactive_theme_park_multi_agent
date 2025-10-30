@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.db import get_session
-from app.schemas import AIConfigIn, AIConfigOut, Page, PageMeta, AdminUserOut
-from app.models import Setting, AdminUser, Role
-from app.deps import get_current_admin, require_roles
-from app.services.ai import get_ai_config, set_ai_config
-from app.utils.security import hash_password
+from ..db import get_session
+from ..schemas import AIConfigIn, AIConfigOut, Page, PageMeta, AdminUserOut
+from ..models import Setting, AdminUser, Role
+from ..deps import get_current_admin, require_roles
+from ..services.ai import get_ai_config, set_ai_config
+from ..utils.security import hash_password
 
 router = APIRouter(tags=["settings"], prefix="/settings")
 
