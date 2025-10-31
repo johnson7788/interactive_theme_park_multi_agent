@@ -20,16 +20,23 @@ type McpMsg     = { type:'mcp'; payload?: any };
 
 export default function Page() {
   // ==== 配置与状态 ====
-  const [otaUrl, setOtaUrl] = useState<string>(() => localStorage.getItem('otaUrl') || 'http://127.0.0.1:8002/xiaozhi/ota/');
+  const [otaUrl, setOtaUrl] = useState<string>('http://127.0.0.1:8002/xiaozhi/ota/');
   const [serverUrl, setServerUrl] = useState<string>('');
-  const [deviceMac, setDeviceMac] = useState<string>(() => localStorage.getItem('deviceMac') || genMac());
+  const [deviceMac, setDeviceMac] = useState<string>('');
   const [deviceName, setDeviceName] = useState('Web测试设备');
   const [clientId, setClientId] = useState('web_test_client');
   const [token, setToken] = useState('your-token1');
 
+  // 客户端初始化localStorage
+  useEffect(() => {
+    setOtaUrl(localStorage.getItem('otaUrl') || 'http://127.0.0.1:8002/xiaozhi/ota/');
+    setDeviceMac(localStorage.getItem('deviceMac') || genMac());
+  }, []);
+
   const [otaOk, setOtaOk] = useState(false);
   const [wsOk, setWsOk] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [opusReady, setOpusReady] = useState(false);
 
   const [message, setMessage] = useState('');
   const [conversation, setConversation] = useState<string[]>([]);
@@ -51,11 +58,18 @@ export default function Page() {
   const log = (msg: string, level: 'info'|'error'|'warning'|'success'|'debug'='info') => {
     const t = new Date();
     const ts = `[${t.toLocaleTimeString()}.${String(t.getMilliseconds()).padStart(3,'0')}] `;
-    setLogs(prev => [...prev, `${ts}${msg}`]);
-    // 控制台也打印
-    if (level === 'error') console.error(msg);
-    else if (level === 'warning') console.warn(msg);
-    else console.log(msg);
+    const logMsg = `${ts}${msg}`;
+    
+    // debug 日志也显示，但用灰色
+    if (level !== 'debug') {
+      setLogs(prev => [...prev, logMsg]);
+    }
+    
+    // 控制台打印
+    if (level === 'error') console.error(logMsg);
+    else if (level === 'warning') console.warn(logMsg);
+    else if (level === 'debug') console.debug(logMsg);
+    else console.log(logMsg);
   };
 
   const addMessage = (text: string, isUser = false) => {
@@ -71,11 +85,46 @@ export default function Page() {
   }, [otaUrl]);
 
   // ==== 载入 libopus.js 并检查 ====
+  useEffect(() => {
+    // 延迟检查，确保 libopus.js 已完全加载
+    const checkTimer = setTimeout(() => {
+      const anyWin = window as any;
+      
+      const logMsg = (msg: string, level: 'info'|'error'|'success' = 'info') => {
+        const t = new Date();
+        const ts = `[${t.toLocaleTimeString()}.${String(t.getMilliseconds()).padStart(3,'0')}] `;
+        const fullMsg = `${ts}${msg}`;
+        setLogs(prev => [...prev, fullMsg]);
+        if (level === 'error') console.error(fullMsg);
+        else console.log(fullMsg);
+      };
+      
+      logMsg('开始检查 Opus 库...', 'info');
+      console.log('window.Module:', anyWin.Module);
+      console.log('window.Module type:', typeof anyWin.Module);
+      
+      if (anyWin.Module) {
+        console.log('Module.instance:', anyWin.Module.instance);
+        console.log('Module._opus_decoder_get_size:', typeof anyWin.Module._opus_decoder_get_size);
+      }
+      
+      checkOpusLoaded({
+        onOk: () => {
+          logMsg('✓ Opus库加载成功', 'success');
+          setOpusReady(true);
+        },
+        onFail: (e) => {
+          logMsg(`✗ Opus库加载失败: ${e}`, 'error');
+          setOpusReady(false);
+        }
+      });
+    }, 1000); // 等待1秒确保 libopus.js 加载完成
+
+    return () => clearTimeout(checkTimer);
+  }, []);
+
   const handleOpusReady = () => {
-    checkOpusLoaded({
-      onOk: () => log('Opus库加载成功', 'success'),
-      onFail: (e) => log(`Opus库加载失败: ${e}`, 'error')
-    });
+    log('libopus.js Script 标签触发 onReady', 'info');
   };
 
   // ==== 可视化 ====
@@ -151,7 +200,24 @@ export default function Page() {
         analyserRef.current = audioCtxRef.current!.createAnalyser();
         analyserRef.current!.fftSize = 2048;
 
-        // 预加载 Opus
+        // 等待 ModuleInstance 准备好
+        const waitForModule = async () => {
+          const anyWin = window as any;
+          let attempts = 0;
+          while (!anyWin.ModuleInstance && attempts < 20) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            attempts++;
+          }
+          return anyWin.ModuleInstance;
+        };
+
+        const mod = await waitForModule();
+        if (!mod) {
+          log('Opus 模块未加载，音频功能可能不可用', 'error');
+          return;
+        }
+
+        // 预加载 Opus 解码器
         try {
           opusDecoderRef.current = createOpusDecoder({
             sampleRate: SAMPLE_RATE,
@@ -164,7 +230,7 @@ export default function Page() {
         }
 
         // 建立 streaming context
-        if (!streamingRef.current) {
+        if (!streamingRef.current && opusDecoderRef.current) {
           streamingRef.current = createStreamingContext(opusDecoderRef.current!, audioCtxRef.current!, SAMPLE_RATE, CHANNELS, MIN_AUDIO_DURATION);
           streamingRef.current.decodeOpusFrames();
           streamingRef.current.startPlaying();
@@ -329,13 +395,30 @@ export default function Page() {
       log('WS 未连接，不能录音', 'error'); return;
     }
 
-    // 确保编码器
-    opusEncoderRef.current = initOpusEncoder({
-      sampleRate: SAMPLE_RATE, channels: CHANNELS, frameSize: FRAME_SIZE,
-      onLog: (m,l) => log(m, l as any)
-    });
+    // 等待 ModuleInstance 准备好
+    const anyWin = window as any;
+    if (!anyWin.ModuleInstance) {
+      log('等待 Opus 模块加载...', 'info');
+      let attempts = 0;
+      while (!anyWin.ModuleInstance && attempts < 20) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+      }
+      if (!anyWin.ModuleInstance) {
+        log('Opus 模块未加载，无法录音', 'error');
+        return;
+      }
+    }
+
+    // 确保编码器（只在第一次初始化）
     if (!opusEncoderRef.current) {
-      log('Opus 编码器初始化失败', 'error'); return;
+      opusEncoderRef.current = initOpusEncoder({
+        sampleRate: SAMPLE_RATE, channels: CHANNELS, frameSize: FRAME_SIZE,
+        onLog: (m,l) => log(m, l as any)
+      });
+      if (!opusEncoderRef.current) {
+        log('Opus 编码器初始化失败', 'error'); return;
+      }
     }
 
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -421,9 +504,7 @@ export default function Page() {
       log('录音停止并发送 stop', 'info');
     } catch {}
 
-    // 销毁编码器
-    try { opusEncoderRef.current?.destroy(); } catch {}
-    opusEncoderRef.current = null;
+    // 注意：不销毁编码器，因为是单例，可以复用
   };
 
   // ==== UI ====
@@ -433,13 +514,14 @@ export default function Page() {
   return (
     <div className="min-h-screen bg-white p-4 md:p-8">
       {/* 加载 libopus.js */}
-      <Script src="/libopus.js" strategy="beforeInteractive" onReady={handleOpusReady} />
+      <Script src="/libopus.js" strategy="afterInteractive" onLoad={handleOpusReady} onError={(e) => log('libopus.js 加载失败', 'error')} />
 
       <h1 className="text-2xl font-bold mb-3">小智服务器测试页面 (Next.js)</h1>
 
       <div className="text-sm text-gray-700 mb-4">
         <span>OTA: <b className={otaOk ? 'text-green-600' : 'text-red-600'}>{otaOk ? 'ota已连接' : 'ota未连接'}</b></span>
         <span className="ml-4">WS: <b className={wsOk ? 'text-green-600' : 'text-red-600'}>{wsOk ? 'ws已连接' : 'ws未连接'}</b></span>
+        <span className="ml-4">Opus: <b className={opusReady ? 'text-green-600' : 'text-orange-600'}>{opusReady ? '已加载' : '加载中...'}</b></span>
       </div>
 
       <section className="border rounded-xl p-4 mb-4">
