@@ -57,3 +57,4 @@ cache
 .env_prod
 /tour_backend/models/SenseVoiceSmall/model.pt
 tour_backend/data/.config.yaml
+tour_backend/data/

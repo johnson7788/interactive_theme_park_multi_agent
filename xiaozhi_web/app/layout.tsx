@@ -1,4 +1,5 @@
 // app/layout.tsx
+import Script from 'next/script';
 export const metadata = {
   title: '服务器测试页面',
   description: 'Next.js 版本',
@@ -7,7 +8,10 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+      {children}
+       <Script src="/libopus.js" strategy="beforeInteractive" />
+      </body>
     </html>
   )
 }
