@@ -516,7 +516,7 @@ export default function Page() {
       {/* 加载 libopus.js */}
       <Script src="/libopus.js" strategy="afterInteractive" onLoad={handleOpusReady} onError={(e) => log('libopus.js 加载失败', 'error')} />
 
-      <h1 className="text-2xl font-bold mb-3">小智服务器测试页面 (Next.js)</h1>
+      <h1 className="text-2xl font-bold mb-3">服务器测试页面 (Next.js)</h1>
 
       <div className="text-sm text-gray-700 mb-4">
         <span>OTA: <b className={otaOk ? 'text-green-600' : 'text-red-600'}>{otaOk ? 'ota已连接' : 'ota未连接'}</b></span>
