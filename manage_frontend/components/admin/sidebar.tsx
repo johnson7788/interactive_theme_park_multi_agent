@@ -1,8 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth';
+import { Button } from '@/components/ui/button';
 import {
   Gamepad2,
   Users,
@@ -12,6 +14,7 @@ import {
   Settings,
   Sparkles,
   MapPin,
+  LogOut,
 } from 'lucide-react';
 
 const navigation = [
@@ -53,6 +56,13 @@ const navigation = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+    router.push('/login');
+  };
 
   return (
     <div className="flex h-screen w-64 flex-col border-r bg-card">
@@ -94,6 +104,17 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+
+      <div className="border-t p-4">
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-3 text-muted-foreground hover:text-foreground"
+          onClick={handleLogout}
+        >
+          <LogOut className="h-5 w-5" />
+          退出登录
+        </Button>
+      </div>
     </div>
   );
 }
