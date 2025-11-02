@@ -20,7 +20,8 @@ type McpMsg     = { type:'mcp'; payload?: any };
 
 export default function Page() {
   // ==== 配置与状态 ====
-  const [otaUrl, setOtaUrl] = useState<string>('http://127.0.0.1:8002/xiaozhi/ota/');
+  // 从环境变量读取 OTA URL
+  const otaUrl = process.env.NEXT_PUBLIC_OTA_URL || 'http://127.0.0.1:8002/xiaozhi/ota/';
   const [serverUrl, setServerUrl] = useState<string>('');
   const [deviceMac, setDeviceMac] = useState<string>('');
   const [deviceName, setDeviceName] = useState('Web测试设备');
@@ -29,7 +30,6 @@ export default function Page() {
 
   // 客户端初始化localStorage
   useEffect(() => {
-    setOtaUrl(localStorage.getItem('otaUrl') || 'http://127.0.0.1:8002/xiaozhi/ota/');
     setDeviceMac(localStorage.getItem('deviceMac') || genMac());
   }, []);
 
@@ -79,10 +79,6 @@ export default function Page() {
   useEffect(() => {
     localStorage.setItem('deviceMac', deviceMac);
   }, [deviceMac]);
-
-  useEffect(() => {
-    localStorage.setItem('otaUrl', otaUrl);
-  }, [otaUrl]);
 
   // ==== 载入 libopus.js 并检查 ====
   useEffect(() => {
@@ -516,7 +512,7 @@ export default function Page() {
       {/* 加载 libopus.js */}
       <Script src="/libopus.js" strategy="afterInteractive" onLoad={handleOpusReady} onError={(e) => log('libopus.js 加载失败', 'error')} />
 
-      <h1 className="text-2xl font-bold mb-3">小智服务器测试页面 (Next.js)</h1>
+      <h1 className="text-2xl font-bold mb-3">服务器测试页面 (Next.js)</h1>
 
       <div className="text-sm text-gray-700 mb-4">
         <span>OTA: <b className={otaOk ? 'text-green-600' : 'text-red-600'}>{otaOk ? 'ota已连接' : 'ota未连接'}</b></span>
@@ -557,8 +553,7 @@ export default function Page() {
 
       <section className="border rounded-xl p-4 mb-4">
         <h2 className="text-lg font-semibold mb-3">连接信息</h2>
-        <div className="grid md:grid-cols-[1fr_1fr_auto] gap-3">
-          <input className="border rounded px-2 py-1" value={otaUrl} onChange={e=>setOtaUrl(e.target.value)} placeholder="OTA 服务器地址" />
+        <div className="grid md:grid-cols-[1fr_auto] gap-3">
           <input className="border rounded px-2 py-1" value={serverUrl} readOnly disabled placeholder="点击连接后自动从 OTA 获取" />
           {!wsOk ? (
             <button className="px-4 py-2 rounded bg-green-600 text-white disabled:opacity-50" disabled={connecting} onClick={connect}>

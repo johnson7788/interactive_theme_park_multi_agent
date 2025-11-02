@@ -1,5 +1,7 @@
 // app/layout.tsx
 import Script from 'next/script';
+import './globals.css';
+
 export const metadata = {
   title: '服务器测试页面',
   description: 'Next.js 版本',

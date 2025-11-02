@@ -3,6 +3,7 @@
 
 # 安装
 ```
+cp env_template .env
 npm install
 npm run dev
 ```
