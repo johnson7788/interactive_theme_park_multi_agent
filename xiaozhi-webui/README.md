@@ -4,6 +4,21 @@
 pnpm install
 pnmp dev
 ```
+修改文件 config/config.json
+注意WS_URL和OTA_VERSION_URL是tour_backend的打印出来的地址
+```
+{
+    "WS_URL": "ws://127.0.0.1:8000/xiaozhi/v1/",
+    "WS_PROXY_URL": "ws://127.0.0.1:5000",
+    "OTA_VERSION_URL": "http://127.0.0.1:8003/xiaozhi/ota/",
+    "TOKEN_ENABLE": true,
+    "TOKEN": "test_token",
+    "BACKEND_URL": "http://127.0.0.1:8081",
+    "CLIENT_ID": "df526a25-bb9f-493a-bf47-43691b811f8a",
+    "DEVICE_ID": "92:25:a6:e5:c7:da"
+}
+```
+
 
 
 
