@@ -19,7 +19,10 @@ pnmp dev
 }
 ```
 
-
+逻辑：
+1. tour_backend先启动，是小智的后端
+2. xiaozhi-webui/backend/main.py 启动后使用backend/config/config.json中的配置连接tour_backend，作为代理后端
+3. 前端xiaozhi-webui/index.html连接代理后端，发送websocket数据信息
 
 
 > 本项目供学习交流使用，如果有问题欢迎联系 zamyang@qq.com
