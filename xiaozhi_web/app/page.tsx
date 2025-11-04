@@ -638,14 +638,14 @@ export default function Page() {
 
   // ==== UI ====
   return (
-      <div className="min-h-screen bg-gradient-to-b from-blue-50 to-purple-50 p-4 md:p-8 font-sans">
+      <div className="min-h-screen bg-[url('/NPC-BG.png')] bg-cover bg-center p-4 md:p-8 font-sans">
         {/* 加载 libopus.js */}
         <Script src="/libopus.js" strategy="afterInteractive" onLoad={handleOpusReady} onError={(e) => log('libopus.js 加载失败', 'error')} />
 
         {/* 用户ID输入弹窗 */}
         {showUserIdModal && (
             <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
-              <div className="bg-white rounded-2xl p-8 max-w-md w-full transform transition-all duration-300 shadow-2xl border-4 border-yellow-400">
+              <div className="bg-white rounded-2xl p-8 max-w-md w-full transform transition-all duration-300 shadow-2xl border-4 border-yellow-400 ">
                 <div className="text-center mb-6">
                   <div className="inline-block p-3 bg-yellow-100 rounded-full mb-4">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
