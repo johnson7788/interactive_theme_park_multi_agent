@@ -112,6 +112,10 @@ export default function Page() {
   const handleUserIdSubmit = () => {
     if (userId.trim()) {
       localStorage.setItem('userId', userId.trim());
+      // 保存设备ID到localStorage
+      if (deviceId.trim()) {
+        localStorage.setItem('deviceId', deviceId.trim());
+      }
       setShowUserIdModal(false);
       // 自动连接
       connect();
