@@ -6,6 +6,7 @@ import { connectViaOTA } from '@/lib/xiaoZhiConnect';
 import { initOpusEncoder, checkOpusLoaded, type OpusEncoderHandle, createOpusDecoder } from '@/lib/opus';
 import { createStreamingContext, StreamingContext } from '@/lib/StreamingContext';
 import BlockingQueue from '@/lib/BlockingQueue';
+import { getUserByName, getNPCById, getCurrentDeviceNPC } from '@/lib/supabase';
 
 const SAMPLE_RATE = 16000;
 const CHANNELS = 1;
@@ -27,12 +28,20 @@ export default function Page() {
   const [deviceName, setDeviceName] = useState('Web测试设备');
   const [clientId, setClientId] = useState('web_test_client');
   const [token, setToken] = useState('your-token1');
-  const [userId, setUserId] = useState('');
+  const [userId, setUserId] = useState('测试张三');
   const [showUserIdModal, setShowUserIdModal] = useState(true);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   // 从环境变量读取设备ID
   const [deviceId, setDeviceId] = useState<string>(process.env.NEXT_PUBLIC_NPC_DEVICE_ID || '');
-
+  // 新增NPC信息状态
+  const [npcInfo, setNpcInfo] = useState<any>(null);
+  
+  // 新增状态管理
+  const [childInfo, setChildInfo] = useState<any>(null);
+  const [showChildInfo, setShowChildInfo] = useState(false);
+  const [showError, setShowError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   // 客户端初始化localStorage
   useEffect(() => {
     const savedUserId = localStorage.getItem('userId');
@@ -108,17 +117,81 @@ export default function Page() {
     }
   }, [deviceId]);
 
-  // 用户ID输入处理
-  const handleUserIdSubmit = () => {
-    if (userId.trim()) {
-      localStorage.setItem('userId', userId.trim());
-      // 保存设备ID到localStorage
-      if (deviceId.trim()) {
-        localStorage.setItem('deviceId', deviceId.trim());
+  // 根据设备ID获取NPC信息
+  useEffect(() => {
+    const fetchNpcInfo = async () => {
+      if (deviceId) {
+        try {
+          const npc = await getNPCById(deviceId);
+          if (npc) {
+            setNpcInfo(npc);
+          }
+        } catch (error) {
+          console.error('获取NPC信息失败:', error);
+        }
+      } else {
+        // 如果没有提供特定的deviceId，使用当前设备默认的NPC
+        try {
+          const npc = await getCurrentDeviceNPC();
+          if (npc) {
+            setNpcInfo(npc);
+          }
+        } catch (error) {
+          console.error('获取默认NPC信息失败:', error);
+        }
       }
-      setShowUserIdModal(false);
-      // 自动连接
-      connect();
+    };
+
+    fetchNpcInfo();
+  }, [deviceId]);
+
+  // 用户ID输入处理
+  const handleUserIdSubmit = async () => {
+    if (userId.trim()) {
+      try {
+        // 先清空之前的错误信息
+        setShowError(false);
+        // 设置加载中状态
+        setIsLoading(true);
+        
+        // 根据用户名查询小朋友信息
+        const userInfo = await getUserByName(userId.trim());
+        
+        if (userInfo) {
+          // 查询成功，记录信息
+          setChildInfo(userInfo);
+          setShowChildInfo(true);
+          
+          // 保存用户信息到localStorage
+          localStorage.setItem('userId', userId.trim());
+          localStorage.setItem('childInfo', JSON.stringify(userInfo));
+          
+          // 保存设备ID到localStorage
+          if (deviceId.trim()) {
+            localStorage.setItem('deviceId', deviceId.trim());
+          }
+          
+          // 延迟隐藏弹窗并连接，让用户有时间查看信息
+          setTimeout(() => {
+            setShowUserIdModal(false);
+            setShowChildInfo(false);
+            // 自动连接
+            connect();
+          }, 3000);
+        } else {
+          // 查询失败，显示错误信息
+          setErrorMessage('找不到该小朋友的信息，请检查名字是否正确！');
+          setShowError(true);
+        }
+      } catch (error) {
+        // 捕获异常，显示错误信息
+        setErrorMessage('查询失败，请稍后再试！');
+        setShowError(true);
+        console.error('查询小朋友信息失败:', error);
+      } finally {
+        // 无论成功失败，都要重置加载状态
+        setIsLoading(false);
+      }
     }
   };
 
@@ -596,12 +669,43 @@ export default function Page() {
                   </div>
                   <button
                       onClick={handleUserIdSubmit}
-                      disabled={!userId.trim()}
+                      disabled={!userId.trim() || isLoading}
                       className={`w-full py-3 px-6 rounded-xl text-white font-bold transition-all ${userId.trim() ? 'bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600' : 'bg-gray-300 cursor-not-allowed'}`}
                   >
-                    开始对话
+                    {isLoading ? (
+                      <span className="flex items-center gap-2 justify-center">
+                        <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        正在查询...
+                      </span>
+                    ) : (
+                      '开始对话'
+                    )}
                   </button>
                 </div>
+                
+                {/* 错误信息显示 */}
+                {showError && (
+                  <div className="mt-4 p-3 bg-red-50 text-red-600 rounded-lg text-center">
+                    {errorMessage}
+                  </div>
+                )}
+                
+                {/* 小朋友信息显示 */}
+                {showChildInfo && childInfo && (
+                  <div className="mt-4 p-3 bg-green-50 text-green-700 rounded-lg animate-fade-in">
+                    <div className="text-center">
+                      <h3 className="font-bold mb-1">欢迎回来，{childInfo.name}！</h3>
+                      <p className="text-sm">你目前的积分为：{childInfo.points}</p>
+                      {childInfo.avatar_url && (
+                        <img 
+                          src={childInfo.avatar_url} 
+                          alt={childInfo.name} 
+                          className="w-16 h-16 mx-auto mt-2 rounded-full border-2 border-green-200"
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Debug信息区域 */}
                 <div className="mt-6">
@@ -675,7 +779,10 @@ export default function Page() {
                     </svg>
                   </div>
                   <div>
-                    <h1 className="text-xl md:text-2xl font-bold">阿派朗智能助手</h1>
+                    <h1 className="text-xl md:text-2xl font-bold">
+                      阿派朗智能助手
+                      {npcInfo?.name && <span className="ml-2 text-base">{npcInfo.name}</span>}
+                    </h1>
                     <p className="text-sm opacity-80">与 {userId} 对话中</p>
                   </div>
                 </div>
