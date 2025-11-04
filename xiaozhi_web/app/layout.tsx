@@ -1,5 +1,4 @@
 // app/layout.tsx
-import Script from 'next/script';
 import './globals.css';
 
 export const metadata = {
@@ -9,11 +8,8 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN">
-      <body>
-      {children}
-       <Script src="/libopus.js" strategy="beforeInteractive" />
-      </body>
-    </html>
+      <html lang="zh-CN">
+      <body>{children}</body>
+      </html>
   )
 }

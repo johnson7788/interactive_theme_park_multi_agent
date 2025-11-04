@@ -19,7 +19,7 @@ type SttMsg     = { type:'stt'; text?:string };
 type McpMsg     = { type:'mcp'; payload?: any };
 
 export default function Page() {
-  // ==== 配置与状态 ====
+  // ==== 配置与状态 ====  
   // 从环境变量读取 OTA URL
   const otaUrl = process.env.NEXT_PUBLIC_OTA_URL || 'http://127.0.0.1:8002/xiaozhi/ota/';
   const [serverUrl, setServerUrl] = useState<string>('');
@@ -27,10 +27,25 @@ export default function Page() {
   const [deviceName, setDeviceName] = useState('Web测试设备');
   const [clientId, setClientId] = useState('web_test_client');
   const [token, setToken] = useState('your-token1');
+  const [userId, setUserId] = useState('');
+  const [showUserIdModal, setShowUserIdModal] = useState(true);
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
+  // 从环境变量读取设备ID
+  const [deviceId, setDeviceId] = useState<string>(process.env.NEXT_PUBLIC_NPC_DEVICE_ID || '');
 
   // 客户端初始化localStorage
   useEffect(() => {
-    setDeviceMac(localStorage.getItem('deviceMac') || genMac());
+    const savedUserId = localStorage.getItem('userId');
+    const savedDeviceMac = localStorage.getItem('deviceMac');
+    const savedDeviceId = localStorage.getItem('deviceId');
+
+    if (savedUserId) {
+      setUserId(savedUserId);
+      setShowUserIdModal(false);
+    }
+
+    setDeviceMac(savedDeviceMac || genMac());
+    setDeviceId(savedDeviceId || process.env.NEXT_PUBLIC_NPC_DEVICE_ID || '');
   }, []);
 
   const [otaOk, setOtaOk] = useState(false);
@@ -39,7 +54,7 @@ export default function Page() {
   const [opusReady, setOpusReady] = useState(false);
 
   const [message, setMessage] = useState('');
-  const [conversation, setConversation] = useState<string[]>([]);
+  const [conversation, setConversation] = useState<Array<{text: string, isUser: boolean, timestamp: Date}>>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [isRecording, setIsRecording] = useState(false);
 
@@ -48,23 +63,29 @@ export default function Page() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const vizIdRef = useRef<number | null>(null);
+  const conversationEndRef = useRef<HTMLDivElement>(null);
 
   const queueRef = useRef(new BlockingQueue<Uint8Array>());
   const streamingRef = useRef<StreamingContext | null>(null);
   const opusDecoderRef = useRef<ReturnType<typeof createOpusDecoder> | null>(null);
   const opusEncoderRef = useRef<OpusEncoderHandle | null>(null);
 
+  // 自动滚动到最新消息
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [conversation]);
+
   // 为 logger/状态展示提供便捷函数
   const log = (msg: string, level: 'info'|'error'|'warning'|'success'|'debug'='info') => {
     const t = new Date();
     const ts = `[${t.toLocaleTimeString()}.${String(t.getMilliseconds()).padStart(3,'0')}] `;
     const logMsg = `${ts}${msg}`;
-    
+
     // debug 日志也显示，但用灰色
     if (level !== 'debug') {
       setLogs(prev => [...prev, logMsg]);
     }
-    
+
     // 控制台打印
     if (level === 'error') console.error(logMsg);
     else if (level === 'warning') console.warn(logMsg);
@@ -73,19 +94,46 @@ export default function Page() {
   };
 
   const addMessage = (text: string, isUser = false) => {
-    setConversation(prev => [...prev, (isUser ? '👉 ' : '🟩 ') + text]);
+    setConversation(prev => [...prev, { text: isUser ? text : text, isUser, timestamp: new Date() }]);
   };
 
   useEffect(() => {
     localStorage.setItem('deviceMac', deviceMac);
   }, [deviceMac]);
 
+  // 保存设备ID到localStorage
+  useEffect(() => {
+    if (deviceId) {
+      localStorage.setItem('deviceId', deviceId);
+    }
+  }, [deviceId]);
+
+  // 用户ID输入处理
+  const handleUserIdSubmit = () => {
+    if (userId.trim()) {
+      localStorage.setItem('userId', userId.trim());
+      setShowUserIdModal(false);
+      // 自动连接
+      connect();
+    }
+  };
+
+  // 结束对话
+  const endConversation = () => {
+    disconnect();
+    setConversation([]);
+    setLogs([]);
+    setShowUserIdModal(true);
+    setUserId('');
+    localStorage.removeItem('userId');
+  };
+
   // ==== 载入 libopus.js 并检查 ====
   useEffect(() => {
     // 延迟检查，确保 libopus.js 已完全加载
     const checkTimer = setTimeout(() => {
       const anyWin = window as any;
-      
+
       const logMsg = (msg: string, level: 'info'|'error'|'success' = 'info') => {
         const t = new Date();
         const ts = `[${t.toLocaleTimeString()}.${String(t.getMilliseconds()).padStart(3,'0')}] `;
@@ -94,16 +142,16 @@ export default function Page() {
         if (level === 'error') console.error(fullMsg);
         else console.log(fullMsg);
       };
-      
+
       logMsg('开始检查 Opus 库...', 'info');
       console.log('window.Module:', anyWin.Module);
       console.log('window.Module type:', typeof anyWin.Module);
-      
+
       if (anyWin.Module) {
         console.log('Module.instance:', anyWin.Module.instance);
         console.log('Module._opus_decoder_get_size:', typeof anyWin.Module._opus_decoder_get_size);
       }
-      
+
       checkOpusLoaded({
         onOk: () => {
           logMsg('✓ Opus库加载成功', 'success');
@@ -385,6 +433,14 @@ export default function Page() {
   registerProcessor('audio-recorder-processor', AudioRecorderProcessor);
   `;
 
+  const toggleRecording = async () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      await startRecording();
+    }
+  };
+
   const startRecording = async () => {
     if (isRecording) return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -504,109 +560,200 @@ export default function Page() {
   };
 
   // ==== UI ====
-  const [showConfig, setShowConfig] = useState(false);
-  const [activeTab, setActiveTab] = useState<'text'|'voice'>('text');
-
   return (
-    <div className="min-h-screen bg-white p-4 md:p-8">
-      {/* 加载 libopus.js */}
-      <Script src="/libopus.js" strategy="afterInteractive" onLoad={handleOpusReady} onError={(e) => log('libopus.js 加载失败', 'error')} />
+      <div className="min-h-screen bg-gradient-to-b from-blue-50 to-purple-50 p-4 md:p-8 font-sans">
+        {/* 加载 libopus.js */}
+        <Script src="/libopus.js" strategy="afterInteractive" onLoad={handleOpusReady} onError={(e) => log('libopus.js 加载失败', 'error')} />
 
-      <h1 className="text-2xl font-bold mb-3">服务器测试页面 (Next.js)</h1>
+        {/* 用户ID输入弹窗 */}
+        {showUserIdModal && (
+            <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+              <div className="bg-white rounded-2xl p-8 max-w-md w-full transform transition-all duration-300 shadow-2xl border-4 border-yellow-400">
+                <div className="text-center mb-6">
+                  <div className="inline-block p-3 bg-yellow-100 rounded-full mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                  </div>
+                  <h2 className="text-2xl font-bold text-purple-800">你好呀！小朋友</h2>
+                  <p className="text-gray-600 mt-2">请输入你的名字，开始奇妙的对话之旅吧！</p>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <input
+                        type="text"
+                        value={userId}
+                        onChange={(e) => setUserId(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleUserIdSubmit()}
+                        className="w-full px-4 py-3 rounded-xl border-2 border-purple-300 focus:border-purple-500 focus:outline-none text-lg text-center transition-all"
+                        placeholder="输入你的名字..."
+                        autoFocus
+                    />
+                  </div>
+                  <button
+                      onClick={handleUserIdSubmit}
+                      disabled={!userId.trim()}
+                      className={`w-full py-3 px-6 rounded-xl text-white font-bold transition-all ${userId.trim() ? 'bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600' : 'bg-gray-300 cursor-not-allowed'}`}
+                  >
+                    开始对话
+                  </button>
+                </div>
 
-      <div className="text-sm text-gray-700 mb-4">
-        <span>OTA: <b className={otaOk ? 'text-green-600' : 'text-red-600'}>{otaOk ? 'ota已连接' : 'ota未连接'}</b></span>
-        <span className="ml-4">WS: <b className={wsOk ? 'text-green-600' : 'text-red-600'}>{wsOk ? 'ws已连接' : 'ws未连接'}</b></span>
-        <span className="ml-4">Opus: <b className={opusReady ? 'text-green-600' : 'text-orange-600'}>{opusReady ? '已加载' : '加载中...'}</b></span>
-      </div>
+                {/* Debug信息区域 */}
+                <div className="mt-6">
+                  <button
+                      onClick={() => setShowDebugInfo(!showDebugInfo)}
+                      className="w-full py-2 px-4 rounded-lg text-sm font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 transition-all"
+                  >
+                    {showDebugInfo ? '隐藏调试信息' : '显示调试信息'}
+                  </button>
 
-      <section className="border rounded-xl p-4 mb-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">
-            设备配置
-            <span className="ml-3 text-sm text-gray-500">
-              MAC: <b>{deviceMac}</b>　客户端: <b>{clientId}</b>
-            </span>
-          </h2>
-          <button className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200" onClick={() => setShowConfig(s => !s)}>
-            {showConfig ? '收起' : '编辑'}
-          </button>
-        </div>
-
-        {showConfig && (
-          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-3 mt-3">
-            <label className="text-sm">设备MAC
-              <input className="border rounded w-full px-2 py-1" value={deviceMac} onChange={e=>setDeviceMac(e.target.value)} />
-            </label>
-            <label className="text-sm">设备名称
-              <input className="border rounded w-full px-2 py-1" value={deviceName} onChange={e=>setDeviceName(e.target.value)} />
-            </label>
-            <label className="text-sm">客户端ID
-              <input className="border rounded w-full px-2 py-1" value={clientId} onChange={e=>setClientId(e.target.value)} />
-            </label>
-            <label className="text-sm">认证Token
-              <input className="border rounded w-full px-2 py-1" value={token} onChange={e=>setToken(e.target.value)} />
-            </label>
-          </div>
-        )}
-      </section>
-
-      <section className="border rounded-xl p-4 mb-4">
-        <h2 className="text-lg font-semibold mb-3">连接信息</h2>
-        <div className="grid md:grid-cols-[1fr_auto] gap-3">
-          <input className="border rounded px-2 py-1" value={serverUrl} readOnly disabled placeholder="点击连接后自动从 OTA 获取" />
-          {!wsOk ? (
-            <button className="px-4 py-2 rounded bg-green-600 text-white disabled:opacity-50" disabled={connecting} onClick={connect}>
-              {connecting ? '连接中...' : '连接'}
-            </button>
-          ) : (
-            <button className="px-4 py-2 rounded bg-red-600 text-white" onClick={disconnect}>断开</button>
-          )}
-        </div>
-      </section>
-
-      <section className="border rounded-xl p-4 mb-4">
-        <div className="flex gap-2 mb-3">
-          <button className={`px-3 py-1 rounded ${activeTab==='text'?'bg-blue-600 text-white':'bg-gray-100'}`} onClick={()=>setActiveTab('text')}>文本消息</button>
-          <button className={`px-3 py-1 rounded ${activeTab==='voice'?'bg-blue-600 text-white':'bg-gray-100'}`} onClick={()=>setActiveTab('voice')}>语音消息</button>
-        </div>
-
-        {activeTab==='text' ? (
-          <div className="flex gap-2">
-            <input className="border rounded px-2 py-1 flex-1" placeholder="输入消息..." value={message} onChange={e=>setMessage(e.target.value)} disabled={!wsOk} onKeyDown={e=>{ if(e.key==='Enter') sendText(); }} />
-            <button className="px-3 py-1 rounded bg-blue-600 text-white disabled:opacity-50" onClick={sendText} disabled={!wsOk}>发送</button>
-          </div>
-        ) : (
-          <div>
-            <div className="flex gap-2 items-center mb-3">
-              {!isRecording ? (
-                <button className="px-3 py-2 rounded bg-emerald-600 text-white disabled:opacity-50" onClick={startRecording} disabled={!wsOk}>开始录音</button>
-              ) : (
-                <button className="px-3 py-2 rounded bg-rose-600 text-white" onClick={stopRecording}>停止录音</button>
-              )}
-              <span className="text-sm text-gray-500">{isRecording ? '录音中...' : '待机'}</span>
+                  {showDebugInfo && (
+                      <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs">
+                        <div className="mb-2">
+                          <div className="text-gray-700 font-medium mb-1">设备信息</div>
+                          <div className="grid grid-cols-2 gap-1">
+                            <div className="text-gray-500">MAC:</div>
+                            <div className="text-gray-800 truncate">{deviceMac}</div>
+                            <div className="text-gray-500">客户端ID:</div>
+                            <div className="text-gray-800 truncate">{clientId}</div>
+                          </div>
+                        </div>
+                        <div className="mb-2">
+                          <div className="text-gray-700 font-medium mb-1">设备ID</div>
+                          <input
+                            type="text"
+                            value={deviceId}
+                            onChange={(e) => setDeviceId(e.target.value)}
+                            className="w-full px-2 py-1 rounded border border-gray-300 text-xs bg-white"
+                            placeholder="输入设备ID..."
+                          />
+                        </div>
+                        <div className="mb-2">
+                          <div className="text-gray-700 font-medium mb-1">连接状态</div>
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-500">OTA:</span>
+                              <span className={otaOk ? 'text-green-600' : 'text-red-600'}>{otaOk ? '已连接' : '未连接'}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-500">WS:</span>
+                              <span className={wsOk ? 'text-green-600' : 'text-red-600'}>{wsOk ? '已连接' : '未连接'}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-500">Opus:</span>
+                              <span className={opusReady ? 'text-green-600' : 'text-orange-600'}>{opusReady ? '已加载' : '加载中...'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-700 font-medium mb-1">服务器URL</div>
+                          <div className="text-gray-800 truncate bg-white p-1 rounded border border-gray-200">
+                            {serverUrl || '未连接'}
+                          </div>
+                        </div>
+                      </div>
+                  )}
+                </div>
+              </div>
             </div>
-            <canvas ref={canvasRef} className="w-full h-32 border rounded" />
-          </div>
         )}
-      </section>
 
-      <section className="border rounded-xl p-4 mb-4">
-        <h2 className="text-lg font-semibold mb-3">会话记录</h2>
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="border rounded p-2 h-64 overflow-auto text-sm bg-gray-50">
-            {conversation.map((m,i)=>(
-              <div key={i} className="mb-1 whitespace-pre-wrap">{m}</div>
-            ))}
-          </div>
-          <div className="border rounded p-2 h-64 overflow-auto text-xs bg-gray-50">
-            {logs.map((l,i)=>(
-              <div key={i} className="whitespace-pre">{l}</div>
-            ))}
-          </div>
-        </div>
-      </section>
-    </div>
+        {/* 主聊天界面 */}
+        {!showUserIdModal && (
+            <div className="max-w-4xl mx-auto bg-white rounded-3xl overflow-hidden shadow-xl border-2 border-purple-200">
+              {/* 头部导航 */}
+              <header className="bg-gradient-to-r from-purple-500 to-pink-500 text-white p-4 md:p-6 flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h1 className="text-xl md:text-2xl font-bold">阿派朗智能助手</h1>
+                    <p className="text-sm opacity-80">与 {userId} 对话中</p>
+                  </div>
+                </div>
+                <button
+                    onClick={endConversation}
+                    className="bg-white bg-opacity-20 hover:bg-opacity-30 transition-all px-4 py-2 rounded-full text-sm font-medium"
+                >
+                  结束对话
+                </button>
+              </header>
+
+              {/* 聊天内容区 */}
+              <main className="p-4 md:p-6 h-[calc(100vh-220px)] md:h-[calc(100vh-250px)] overflow-y-auto bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgdmlld0JveD0iMCAwIDYwIDYwIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMzLjMxNCAwIDYtMi42ODYgNi02cy0yLjY4Ni02LTYtNi02IDIuNjg2LTYgNiAyLjY4NiA2IDYgNnptMCAzMGMzLjMxNCAwIDYtMi42ODYgNi02cy0yLjY4Ni02LTYtNi02IDIuNjg2LTYgNiAyLjY4NiA2IDYgNnptLTE4LTE4YzMuMzE0IDAgNi0yLjY4NiA2LTZzLTIuNjg2LTYtNi02LTYgMi42ODYtNiA2IDIuNjg2IDYgNiA2em0wIDMGMzMuMzE0IDAgMzYgMi42ODYgMzYgNnMtMi42ODYgNi02IDYtNi0yLjY4Ni02LTYgMi42ODYtNiA2LTZ6bTE4IDBjMy4zMTQgMCA2LTIuNjg2IDYtNnMtMi42ODYtNi02LTYtNiAyLjY4Ni02IDYgMi42ODYgNiA2IDZ6bS0zNiAxOGMzLjMxNCAwIDYtMi42ODYgNi02cy0yLjY4Ni02LTYtNi02IDIuNjg2LTYgNiAyLjY4NiA2IDYgNnptMTggMzBjMy4zMTQgMCA2LTIuNjg2IDYtNnMtMi42ODYtNi02LTYtNiAyLjY4Ni02IDYgMi42ODYgNiA2IDZ6bTE4LTE4YzMuMzE0IDAgNi0yLjY4NiA2LTZzLTIuNjg2LTYtNi02LTYgMi42ODYtNiA2IDIuNjg2IDYgNiA2em0wIDBIMHY2MGgzNnYwSDB6bTE4IDE4VjBIMHYxOEgzNnoiLz48L2c+PC9zdmc+')] bg-repeat">
+                <div className="space-y-4">
+                  {conversation.length === 0 ? (
+                      <div className="text-center py-8 text-gray-400">
+                        <div className="mb-4 inline-block">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                          </svg>
+                        </div>
+                        <p>点击下方麦克风开始和阿派朗智能助手聊天吧！</p>
+                      </div>
+                  ) : (
+                      conversation.map((msg, index) => (
+                          <div key={index} className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[75%] ${msg.isUser ? 'mr-2' : 'ml-2'}`}>
+                              <div className={`${msg.isUser ? 'bg-blue-100' : 'bg-white'} p-3 md:p-4 rounded-2xl shadow-sm border ${msg.isUser ? 'border-blue-200 rounded-br-none' : 'border-gray-200 rounded-bl-none'}`}>
+                                <p className="text-gray-800 whitespace-pre-wrap">{msg.text}</p>
+                              </div>
+                              <div className={`text-xs text-gray-400 mt-1 ${msg.isUser ? 'text-right' : 'text-left'}`}>
+                                {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </div>
+                            </div>
+                          </div>
+                      ))
+                  )}
+                  <div ref={conversationEndRef} />
+                </div>
+              </main>
+
+              {/* 底部输入区 */}
+              <footer className="p-4 border-t border-gray-100 bg-gradient-to-t from-white to-gray-50">
+                <div className="flex items-center justify-between space-x-3">
+                  <div className="flex-1">
+                    <input
+                        type="text"
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && sendText()}
+                        className="w-full px-4 py-3 rounded-full border-2 border-purple-200 focus:border-purple-400 focus:outline-none transition-all bg-white shadow-sm"
+                        placeholder="输入消息..."
+                    />
+                  </div>
+                  <button
+                      onClick={toggleRecording}
+                      disabled={!wsOk}
+                      className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-purple-500 text-white hover:bg-purple-600'}`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      {isRecording ? (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" />
+                      ) : (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      )}
+                    </svg>
+                  </button>
+                </div>
+                {isRecording && (
+                    <div className="mt-3 bg-red-50 p-2 rounded-lg border border-red-100">
+                      <div className="flex items-center text-red-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-sm font-medium">录音中，请说话...</span>
+                      </div>
+                    </div>
+                )}
+              </footer>
+            </div>
+        )}
+      </div>
   );
 }
 
