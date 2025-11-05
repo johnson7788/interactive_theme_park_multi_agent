@@ -70,9 +70,13 @@ export default function Page() {
         ...prev,
         vadState: VadState.SPEECH_DETECTED
       }));
-      
+
+      console.log('conversationState.isListening (state值，可能是旧的)', conversationState.isListening);
+      console.log('isListeningRef.current (ref值，总是最新的)', isListeningRef.current);
+
       // 如果当前没有在录音，开始语音监听
-      if (!conversationState.isListening) {
+      // 使用ref中的最新状态值，而不是直接使用state
+      if (!isListeningRef.current) {
         startVoiceListening();
       }
     },
@@ -155,24 +159,22 @@ export default function Page() {
       // 初始化对话状态
       setConversationState(prev => ({
         ...prev,
-        isListening: false,
+        isListening: true,
         isSpeaking: false,
         vadState: currentVadState, // 使用当前的VAD状态
         isProcessingASR: false
       }));
-      
+
       // 可以在这里触发与NPC的对话
       addMessage('您好！我是阿派朗智能助手，很高兴为您服务。', false);
       
       // 记录通话开始时间
       log('VAD连续对话通话已开始，等待语音输入...', 'success');
 
-
       // 此处可以添加模拟音频发送
       setTimeout(() => {
         sendMockAudio();
       }, 100);
-
 
     } catch (error) {
       console.error('启动电话失败:', error);
@@ -191,59 +193,68 @@ export default function Page() {
     try {
       console.log('发送模拟音频数据...');
       
-      // 创建模拟音频数据（中文读出1-6的数字：1，2，3，4，5，6）
-      // 这是一个更详细的模拟Opus帧数据，代表中文语音内容
-      const mockAudioData = new Uint8Array([
-        111, 112, 117, 115, // Opus标识
-        0, 184, 0, 0, // 帧长度和配置
-        // 模拟中文读出"1，2，3，4，5，6"的音频数据
-        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7,
-        192, 3, 64, 9, 128, 11, 224, 12, 96, 8, 160, 14, 32, 13, 0, 15,
-        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7,
-        192, 3, 64, 9, 128, 11, 224, 12, 96, 8, 160, 14, 32, 13, 0, 15,
-        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7,
-        192, 3, 64, 9, 128, 11, 224, 12, 96, 8, 160, 14, 32, 13, 0, 15,
-        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7,
-        192, 3, 64, 9, 128, 11, 224, 12, 96, 8, 160, 14, 32, 13, 0, 15,
-        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7,
-        192, 3, 64, 9, 128, 11, 224, 12, 96, 8, 160, 14, 32, 13, 0, 15,
-        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7,
-        192, 3, 64, 9, 128, 11, 224, 12, 96, 8, 160, 14, 32, 13, 0, 15,
-        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7
-      ]);
+      // 确保Opus编码器已初始化
+      if (!opusEncoderRef.current) {
+        console.log('初始化Opus编码器...');
+        opusEncoderRef.current = initOpusEncoder({
+          sampleRate: SAMPLE_RATE, 
+          channels: CHANNELS, 
+          frameSize: FRAME_SIZE,
+        });
+      }
       
-      // 将模拟音频数据添加到conversationState.audioBuffers中
-      setConversationState(prev => ({
-        ...prev,
-        audioBuffers: [...prev.audioBuffers, mockAudioData],
-        listeningStartTime: Date.now().valueOf() - 2000,
-        listeningDuration: 2
-      }));
+      // 创建模拟的PCM音频数据（中文读出1-6的数字）
+      // 这里创建一个Int16Array格式的PCM数据，模拟中文语音特征
+      const mockPCMData = new Int16Array(FRAME_SIZE * CHANNELS);
       
-      console.log('模拟音频数据已添加到缓冲区');
+      // 为了模拟中文语音特征，我们创建一些波形数据
+      for (let i = 0; i < mockPCMData.length; i++) {
+        // 使用不同频率的正弦波叠加来模拟语音特征
+        const t = i / SAMPLE_RATE;
+        mockPCMData[i] = Math.floor(3000 * (
+          Math.sin(2 * Math.PI * 440 * t) + // 440Hz - 对应"1"的音调
+          0.7 * Math.sin(2 * Math.PI * 523 * t) + // 523Hz - 对应"2"的音调
+          0.5 * Math.sin(2 * Math.PI * 659 * t) + // 659Hz - 对应"3"的音调
+          0.4 * Math.sin(2 * Math.PI * 698 * t) + // 698Hz - 对应"4"的音调
+          0.3 * Math.sin(2 * Math.PI * 880 * t) + // 880Hz - 对应"5"的音调
+          0.2 * Math.sin(2 * Math.PI * 1047 * t)  // 1047Hz - 对应"6"的音调
+        ));
+      }
       
-      // 模拟触发onSpeechEndCallback
-      // 直接调用在VAD配置中定义的回调函数逻辑
-      setTimeout(() => {
-        console.log('模拟触发语音结束回调');
-
-        // 更新对话状态
+      // 使用Opus编码器对模拟PCM数据进行编码
+      const encoded = opusEncoderRef.current.encode(mockPCMData);
+      
+      if (encoded && encoded.byteLength > 0) {
+        console.log('模拟音频数据编码成功，大小:', encoded.byteLength, '字节');
+        
+        // 创建新的音频缓冲区
+        const newAudioBuffers = [...conversationState.audioBuffers, encoded, encoded, encoded, encoded, encoded];
+        
+        // 合并所有状态更新到一次setState调用
         setConversationState(prev => ({
           ...prev,
+          audioBuffers: newAudioBuffers,
+          lastAudioSentTime: Date.now(),
           isProcessingASR: true,
           vadState: VadState.SILENCE
         }));
-        
+
+        console.log('发送请求前二次确认, 音频数据共', audioBuffersRef.current, '帧');
+
         // 发送缓冲的音频数据
-        sendBufferedAudio();
-        
+        sendBufferedAudio( );
+
         // 延迟发送语音结束标记，确保所有音频数据都已发送
         setTimeout(() => {
           sendVoiceData();
         }, 100);
 
-      }, 100);
-      
+
+      }
+      else {
+        console.warn('模拟音频数据编码失败或为空');
+      }
+
     } catch (error) {
       console.error('发送模拟音频失败:', error);
     }
@@ -323,6 +334,20 @@ export default function Page() {
     lastAudioSentTime: 0,
     sessionId: ''
   });
+
+  // 使用ref来保存最新的isListening状态，以便在回调中立即访问
+  const isListeningRef = useRef(false);
+  const audioBuffersRef = useRef<Uint8Array[]>([]);
+  
+  // 监听isListening状态的变化
+  useEffect(() => {
+    isListeningRef.current = conversationState.isListening;
+  }, [conversationState.isListening]);
+  
+  // 监听audioBuffers状态的变化
+  useEffect(() => {
+    audioBuffersRef.current = conversationState.audioBuffers;
+  }, [conversationState.audioBuffers]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -1110,12 +1135,16 @@ export default function Page() {
     }
 
     try {
+      // 使用ref获取最新的audioBuffers值
+      const currentAudioBuffers = audioBuffersRef.current;
+      log(`检测音频数据，共 ${currentAudioBuffers.length} 帧`, 'info');
+
       // 如果有缓冲的音频数据，发送它们
-      if (conversationState.audioBuffers && conversationState.audioBuffers.length > 0) {
-        log(`发送缓冲的音频数据，共 ${conversationState.audioBuffers.length} 帧`, 'info');
+      if (currentAudioBuffers && currentAudioBuffers.length > 0) {
+        log(`发送缓冲的音频数据，共 ${currentAudioBuffers.length} 帧`, 'info');
         
         // 发送所有缓冲的音频帧
-        conversationState.audioBuffers.forEach((buffer, index) => {
+        currentAudioBuffers.forEach((buffer, index) => {
           if (buffer && buffer.length > 0) {
             wsRef.current?.send(buffer);
           }
@@ -1233,7 +1262,7 @@ export default function Page() {
         ...prev,
         isListening: true,
         listeningStartTime: currentTime,
-        audioBuffers: [],
+        // audioBuffers: [],
         vadState: VadState.SPEECH_DETECTED
       }));
       
