@@ -239,14 +239,30 @@ export default function Page() {
           vadState: VadState.SILENCE
         }));
 
-        console.log('发送请求前二次确认, 音频数据共', audioBuffersRef.current, '帧');
-
-        // 发送缓冲的音频数据
-        sendBufferedAudio( );
-
         // 延迟发送语音结束标记，确保所有音频数据都已发送
         setTimeout(() => {
-          sendVoiceData();
+          console.log('发送请求前二次确认, 音频数据共', audioBuffersRef.current, '帧');
+
+          // TODO 未发送"语音开始"信号 detect
+          // 使用与服务端期望的listen消息格式
+          const listenMessage = {
+            type: 'listen',
+            mode: 'manual',  // 使用手动模式，由我们控制开始/停止
+            state: 'start'   // 表示开始录音
+          };
+
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            log(`发送录音开始消息: ${JSON.stringify(listenMessage)}`, 'info');
+            wsRef.current.send(JSON.stringify(listenMessage));
+          }
+
+          // 发送缓冲的音频数据
+          sendBufferedAudio( audioBuffersRef.current );
+
+          setTimeout(function (){
+            sendVoiceData();
+          }, 100)
+
         }, 100);
 
 
@@ -1046,41 +1062,192 @@ export default function Page() {
     // 注意：不销毁编码器，因为是单例，可以复用
   };
 
-  // 发送语音数据函数
-  const sendVoiceData = () => {
+  // 发送缓冲的音频数据到WebSocket
+  const sendBufferedAudio = async (audioBuffers: Uint8Array[] = []) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      log('WebSocket 未连接，无法发送语音数据', 'error');
-      return;
+      log('WebSocket未连接，无法发送音频数据', 'warning');
+      return false;
+    }
+
+    if (!audioBuffers || audioBuffers.length === 0) {
+      log('没有要发送的音频数据', 'info');
+      return true;
     }
 
     try {
-      // 计算录音时长
-      const currentTime = Date.now();
-      const listeningDuration = conversationState.listeningStartTime ?
-        currentTime - conversationState.listeningStartTime : 0;
+      log(`准备发送 ${audioBuffers.length} 帧音频数据`, 'info');
+      
+      // 创建一个包含所有音频帧的新数组，避免在循环中修改原始数组
+      const buffersToSend = [...audioBuffers];
+      
+      // 设置一个最大尝试次数，避免无限循环
+      const MAX_RETRIES = 3;
+      let retries = 0;
+      let allSent = true;
+      
+      for (let i = 0; i < buffersToSend.length; i++) {
+        const buffer = buffersToSend[i];
+        if (!buffer || buffer.length === 0) {
+          log(`跳过空的音频帧 #${i}`, 'debug');
+          continue;
+        }
 
-      // 发送语音结束标记
-      wsRef.current.send(JSON.stringify({
-        type: 'listen',
-        mode: 'auto',
-        state: 'stop',
-        timestamp: currentTime,
-        session_id: conversationState.sessionId
-      }));
+        let frameSent = false;
+        retries = 0;
+        
+        while (!frameSent && retries < MAX_RETRIES) {
+          try {
+            // 优先使用二进制方式发送
+            wsRef.current.send(buffer);
+            log(`音频帧 #${i} 发送成功（长度: ${buffer.length}字节）`, 'debug');
+            frameSent = true;
+          } catch (error: any) {
+            retries++;
+            log(`音频帧 #${i} 二进制发送失败 (${error?.message})，尝试第${retries}次base64编码发送`, 'warning');
+            
+            try {
+              // 将Uint8Array转换为base64
+              const base64String = arrayBufferToBase64(buffer.buffer);
+              if (base64String) {
+                const base64Message = {
+                  type: 'audio_chunk',
+                  data: base64String,
+                  index: i,
+                  total: buffersToSend.length
+                };
+                wsRef.current.send(JSON.stringify(base64Message));
+                log(`音频帧 #${i} base64编码发送成功`, 'info');
+                frameSent = true;
+              } else {
+                log(`音频帧 #${i} base64编码失败`, 'error');
+              }
+            } catch (base64Error) {
+              log(`音频帧 #${i} base64编码发送也失败: ${base64Error}`, 'error');
+            }
+            
+            if (!frameSent && retries < MAX_RETRIES) {
+              // 等待短暂时间后重试
+              await new Promise(resolve => setTimeout(resolve, 20));
+            }
+          }
+        }
+        
+        if (!frameSent) {
+          log(`音频帧 #${i} 发送失败，已达到最大重试次数`, 'error');
+          allSent = false;
+        }
+        
+        // 为了避免发送过快导致网络拥塞，添加小延迟
+        if (i < buffersToSend.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      }
+      
+      // 只有当所有帧都发送成功时才清空缓冲区
+      if (allSent) {
+        setConversationState(prev => ({
+          ...prev,
+          audioBuffers: []
+        }));
+        log('所有音频帧发送完成', 'success');
+      }
+      
+      return allSent;
+    } catch (error: any) {
+      log(`发送缓冲音频数据失败: ${error?.message || error}`, 'error');
+      return false;
+    }
+  };
 
-      // 更新对话状态
-      setConversationState(prev => ({
-        ...prev,
-        isSpeaking: false,
-        listeningStartTime: null,
-        listeningDuration,
-        vadState: VadState.SILENCE
-      }));
+  // base64 编码工具函数
+  const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+  };
 
-      log(`语音数据发送完成，录音时长: ${listeningDuration}ms`, 'success');
-
+  // 发送语音数据函数
+  const sendVoiceData = async () => {
+    log('开始发送语音数据...', 'info');
+    
+    // 1. 确保WebSocket连接已建立
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      log('WebSocket 未连接，尝试重新连接...', 'warning');
+      // 如果WebSocket未连接，尝试连接
+      if (!connecting) {
+        await connect();
+      }
+      // 再次检查连接状态
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        log('连接失败，无法继续语音发送流程', 'error');
+        // 出错时重置状态
+        setConversationState(prev => ({
+          ...prev,
+          isSpeaking: false,
+          listeningStartTime: null,
+          vadState: VadState.ERROR
+        }));
+        return;
+      }
+    }
+    
+    try {
+      // 2. 获取缓冲区数据
+      const currentBuffers = conversationState.audioBuffers;
+      
+      if (currentBuffers.length === 0) {
+        log('没有录制到有效音频，发送空消息', 'warning');
+        
+        // 发送空消息表示完成
+        const endMessage = {
+          type: 'listen',
+          mode: 'manual',
+          state: 'stop',
+          timestamp: Date.now(),
+          session_id: conversationState.sessionId
+        };
+        try {
+          wsRef.current.send(JSON.stringify(endMessage));
+          log('空音频结束消息已发送', 'info');
+          
+          // 更新对话状态
+          setConversationState(prev => ({
+            ...prev,
+            isSpeaking: false,
+            listeningStartTime: null,
+            vadState: VadState.SILENCE,
+            isProcessingASR: false,
+            audioBuffers: []
+          }));
+        } catch (error) {
+          log(`发送空音频结束消息失败: ${error}`, 'error');
+          // 出错时重置状态
+          setConversationState(prev => ({
+            ...prev,
+            isSpeaking: false,
+            listeningStartTime: null,
+            vadState: VadState.ERROR
+          }));
+        }
+        return;
+      }
+      
+      // 3. 发送缓冲的音频数据
+      const sendSuccess = await sendBufferedAudio(currentBuffers);
+      
+      // 4. 发送结束标志
+      if (sendSuccess) {
+        completeVoiceDataSending();
+      } else {
+        log('部分音频帧发送失败，仍尝试发送结束消息', 'warning');
+        completeVoiceDataSending();
+      }
     } catch (error) {
-      log(`发送语音数据失败: ${error}`, 'error');
+      log(`发送语音数据过程中发生错误: ${error}`, 'error');
       // 出错时重置状态
       setConversationState(prev => ({
         ...prev,
@@ -1091,6 +1258,53 @@ export default function Page() {
     }
   };
 
+  // 完成语音数据发送的辅助函数
+  const completeVoiceDataSending = () => {
+    try {
+      // 计算录音时长
+      const currentTime = Date.now();
+      const listeningDuration = conversationState.listeningStartTime ?
+        currentTime - conversationState.listeningStartTime : 0;
+
+      // 发送一个空的消息作为结束标志
+      const emptyOpusFrame = new Uint8Array(0);
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(emptyOpusFrame);
+        log('结束帧发送成功', 'info');
+      }
+
+      // 发送语音结束标记
+      const stopMessage = {
+        type: 'listen',
+        mode: 'manual',
+        state: 'stop',
+        timestamp: currentTime,
+        session_id: conversationState.sessionId,
+        audio_count: conversationState.audioBuffers.length
+      };
+
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify(stopMessage));
+        log('已发送语音结束标记', 'info');
+      }
+
+      // 更新对话状态
+      setConversationState(prev => ({
+        ...prev,
+        isSpeaking: false,
+        listeningStartTime: null,
+        listeningDuration,
+        vadState: VadState.SILENCE,
+        isProcessingASR: false,
+        lastVoiceTime: currentTime
+      }));
+
+      log(`语音数据发送完成，录音时长: ${listeningDuration}ms`, 'success');
+
+    } catch (error) {
+      log(`完成语音数据发送时出错: ${error}`, 'error');
+    }
+  };
   // 处理ASR结果
   const handleASRResult = (text: string) => {
     log(`识别结果: ${text}`, 'info');
@@ -1104,69 +1318,29 @@ export default function Page() {
       isProcessingASR: false
     }));
     
-    // 添加识别结果到会话记录（与test_page.html保持一致）
-    addMessage(`[语音识别] ${text}`, true);
+    // 添加识别结果到会话记录
+    addMessage(text, true);
     
     // 如果识别结果包含有效内容，可以自动触发对话响应
     if (text.trim().length > 1) {
-      // 可以在这里添加自动对话逻辑
-      // 例如：延迟一段时间后自动发送到LLM进行回复
-      setTimeout(() => {
-        // 自动发送识别结果到LLM
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          const payload = { 
-            type: 'listen', 
-            mode: 'auto', 
-            state: 'detect', 
-            text: text.trim() 
-          };
-          wsRef.current.send(JSON.stringify(payload));
-          log(`自动发送识别结果到LLM: ${text.trim()}`, 'info');
-        }
-      }, 500);
-    }
-  };
-
-  // 发送缓冲的音频数据
-  const sendBufferedAudio = () => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      log('WebSocket 未连接，无法发送缓冲音频', 'error');
-      return;
-    }
-
-    try {
-      // 使用ref获取最新的audioBuffers值
-      const currentAudioBuffers = audioBuffersRef.current;
-      log(`检测音频数据，共 ${currentAudioBuffers.length} 帧`, 'info');
-
-      // 如果有缓冲的音频数据，发送它们
-      if (currentAudioBuffers && currentAudioBuffers.length > 0) {
-        log(`发送缓冲的音频数据，共 ${currentAudioBuffers.length} 帧`, 'info');
-        
-        // 发送所有缓冲的音频帧
-        currentAudioBuffers.forEach((buffer, index) => {
-          if (buffer && buffer.length > 0) {
-            wsRef.current?.send(buffer);
-          }
-        });
-        
-        // 清空缓冲区
-        setConversationState(prev => ({
-          ...prev,
-          audioBuffers: []
-        }));
-        
-        log('缓冲音频数据发送完成', 'success');
+      // 自动发送识别结果到LLM
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        const payload = {
+          type: 'listen',
+          mode: 'manual',
+          state: 'detect',
+          text: text.trim()
+        };
+        wsRef.current.send(JSON.stringify(payload));
+        log(`自动发送识别结果到LLM: ${text.trim()}`, 'info');
       }
-    } catch (error) {
-      log(`发送缓冲音频数据失败: ${error}`, 'error');
     }
   };
 
   // 开始语音监听
   const startVoiceListening = async () => {
-    if (conversationState.isListening) {
-      log('语音监听已在进行中', 'info');
+    if (conversationState.isListening || isRecording) {
+      log('语音监听或录音已在进行中', 'info');
       return;
     }
 
@@ -1180,7 +1354,7 @@ export default function Page() {
           onLog: (m,l) => log(m, l as any)
         });
         if (!opusEncoderRef.current) {
-          log('Opus 编码器初始化失败', 'error'); 
+          log('Opus编码器初始化失败', 'error');
           return;
         }
         log('Opus编码器初始化完成', 'success');
@@ -1188,12 +1362,12 @@ export default function Page() {
       
       // 请求麦克风权限
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { 
-          echoCancellation: true, 
-          noiseSuppression: true, 
-          sampleRate: SAMPLE_RATE, 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: SAMPLE_RATE,
           channelCount: 1,
-          autoGainControl: true 
+          autoGainControl: true
         }
       });
       log('麦克风权限获取成功', 'success');
@@ -1206,64 +1380,130 @@ export default function Page() {
       analyserRef.current.fftSize = 2048;
       src.connect(analyserRef.current);
       
-      // 创建音频处理节点
-      const processor = ctx.createScriptProcessor(4096, 1, 1);
-      
-      processor.onaudioprocess = (event) => {
-        if (!conversationState.isListening) return;
+      // 使用统一的处理方式，优先使用AudioWorklet
+      try {
+        // 预注册 AudioWorkletProcessor
+        const blob = new Blob([workletCode], { type: 'application/javascript' });
+        const url = URL.createObjectURL(blob);
+        await ctx.audioWorklet.addModule(url);
+        URL.revokeObjectURL(url);
         
-        const inputData = event.inputBuffer.getChannelData(0);
-        
-        // 转换为Int16Array
-        const int16Data = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          int16Data[i] = Math.max(-32768, Math.min(32767, Math.floor(inputData[i] * 32767)));
-        }
-        
-        // 编码为Opus
-        if (opusEncoderRef.current) {
-          try {
-            const opusFrame = opusEncoderRef.current.encode(int16Data);
-            if (opusFrame && opusFrame.length > 0) {
-              // 缓冲音频数据
-              setConversationState(prev => ({
-                ...prev,
-                audioBuffers: [...prev.audioBuffers, opusFrame]
-              }));
+        const node = new (window as any).AudioWorkletNode(ctx, 'audio-recorder-processor');
+        node.port.onmessage = (e: MessageEvent) => {
+          if (e.data?.type === 'buffer') {
+            const frame: Int16Array = e.data.buffer;
+            try {
+              const encoded = opusEncoderRef.current!.encode(frame);
+              if (encoded && encoded.byteLength > 0) {
+                // 缓冲音频数据
+                setConversationState(prev => ({
+                  ...prev,
+                  audioBuffers: [...prev.audioBuffers, encoded],
+                  lastAudioSentTime: Date.now()
+                }));
+              }
+            } catch (err:any) {
+              log(`Opus 编码错误: ${err?.message || err}`, 'error');
             }
-          } catch (err:any) {
-            log(`Opus 编码错误: ${err?.message || err}`, 'error');
           }
+        };
+        // 需要有输出以触发处理（静音增益）
+        const silent = ctx.createGain();
+        silent.gain.value = 0;
+        node.connect(silent); 
+        silent.connect(ctx.destination);
+
+        src.connect(node);
+        (node as any).__src = src;  // 保存引用，stop 时断开
+
+        // 保存引用以便停止时断开连接
+        (window as any).__voiceProcessor = node;
+        (window as any).__voiceSource = src;
+        
+        // 发送监听开始消息
+        const currentTime = Date.now();
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          const startMessage = {
+            type:'listen',
+            mode:'manual',
+            state:'start',
+            timestamp: currentTime,
+            session_id: conversationState.sessionId
+          };
+          wsRef.current.send(JSON.stringify(startMessage));
+          log('语音监听开始消息已发送', 'info');
         }
-      };
-      
-      src.connect(processor);
-      processor.connect(ctx.destination);
-      
-      // 保存引用以便停止时断开连接
-      (window as any).__voiceProcessor = processor;
-      (window as any).__voiceSource = src;
-      
-      // 发送监听开始消息
-      const currentTime = Date.now();
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ 
-          type:'listen', 
-          mode:'auto', 
-          state:'start',
-          timestamp: currentTime,
-          session_id: conversationState.sessionId 
-        }));
-        log('语音监听开始消息已发送', 'info');
+        node.port.postMessage({ command: 'start' });
+
+        // 启动可视化
+        if (canvasRef.current) {
+          canvasRef.current.width = canvasRef.current.clientWidth;
+          canvasRef.current.height = canvasRef.current.clientHeight;
+        }
+        vizIdRef.current = requestAnimationFrame(draw);
+        
+      } catch (error: any) {
+        // 回退到ScriptProcessor
+        log(`AudioWorklet 不可用: ${error.message}，使用ScriptProcessor回退方案`, 'warning');
+        
+        const processor = ctx.createScriptProcessor(4096, 1, 1);
+        processor.onaudioprocess = (event) => {
+          if (!conversationState.isListening) return;
+          
+          const inputData = event.inputBuffer.getChannelData(0);
+          
+          // 转换为Int16Array
+          const int16Data = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            int16Data[i] = Math.max(-32768, Math.min(32767, Math.floor(inputData[i] * 32767)));
+          }
+          
+          // 编码为Opus
+          if (opusEncoderRef.current) {
+            try {
+              const opusFrame = opusEncoderRef.current.encode(int16Data);
+              if (opusFrame && opusFrame.length > 0) {
+                // 缓冲音频数据
+                setConversationState(prev => ({
+                  ...prev,
+                  audioBuffers: [...prev.audioBuffers, opusFrame]
+                }));
+              }
+            } catch (err:any) {
+              log(`Opus 编码错误: ${err?.message || err}`, 'error');
+            }
+          }
+        };
+        
+        src.connect(processor);
+        processor.connect(ctx.destination);
+        
+        // 保存引用以便停止时断开连接
+        (window as any).__voiceProcessor = processor;
+        (window as any).__voiceSource = src;
+        
+        // 发送监听开始消息
+        const currentTime = Date.now();
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          const startMessage = {
+            type:'listen',
+            mode:'manual',
+            state:'start',
+            timestamp: currentTime,
+            session_id: conversationState.sessionId
+          };
+          wsRef.current.send(JSON.stringify(startMessage));
+          log('语音监听开始消息已发送', 'info');
+        }
       }
       
       // 更新对话状态
       setConversationState(prev => ({
         ...prev,
         isListening: true,
-        listeningStartTime: currentTime,
-        // audioBuffers: [],
-        vadState: VadState.SPEECH_DETECTED
+        listeningStartTime: Date.now(),
+        vadState: VadState.SPEECH_DETECTED,
+        audioBuffers: [] // 清空之前的缓冲区
       }));
       
       log('语音监听已开始', 'success');
@@ -1281,66 +1521,92 @@ export default function Page() {
 
   // 停止语音监听
   const stopVoiceListening = () => {
-    if (!conversationState.isListening) return;
+    log('停止语音监听...', 'info');
     
-    try {
-      // 断开音频处理节点
-      const processor: any = (window as any).__voiceProcessor;
-      const src: any = (window as any).__voiceSource;
-      
-      if (processor) {
-        try { processor.disconnect(); } catch {}
+    // 清除动画帧
+    if (vizIdRef.current) {
+      cancelAnimationFrame(vizIdRef.current);
+      vizIdRef.current = null;
+    }
+    
+    // 断开音频处理节点连接
+    const processor = (window as any).__voiceProcessor;
+    const source = (window as any).__voiceSource;
+    
+    if (processor) {
+      if (source) {
+        try {
+          source.disconnect(processor);
+        } catch (e) {
+          log(`断开source到processor连接失败: ${e}`, 'debug');
+        }
       }
-      if (src) {
-        try { src.disconnect(); } catch {}
+      
+      if (processor instanceof AudioWorkletNode) {
+        try {
+          processor.port.postMessage({ command: 'stop' });
+        } catch (e) {
+          log(`发送stop命令到AudioWorklet失败: ${e}`, 'debug');
+        }
+        try {
+          processor.disconnect();
+        } catch (e) {
+          log(`断开AudioWorklet节点失败: ${e}`, 'debug');
+        }
+      } else if (processor.onaudioprocess) {
+        try {
+          processor.onaudioprocess = null;
+          processor.disconnect();
+        } catch (e) {
+          log(`断开ScriptProcessor节点失败: ${e}`, 'debug');
+        }
       }
       
       (window as any).__voiceProcessor = null;
       (window as any).__voiceSource = null;
-      
-      // 发送监听结束消息
-      const currentTime = Date.now();
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        // 发送一个空的消息作为结束标志
-        const emptyOpusFrame = new Uint8Array(0);
+    }
+    
+    // 发送监听结束消息
+    const currentTime = Date.now();
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // 发送空的Opus帧表示结束
+      const emptyOpusFrame = new Uint8Array(0);
+      try {
         wsRef.current.send(emptyOpusFrame);
-        
-        // 发送监听结束消息
-        const stopMessage = {
-          type: 'listen',
-          mode: 'auto',
-          state: 'stop',
-          timestamp: currentTime,
-          session_id: conversationState.sessionId
-        };
-        
-        wsRef.current.send(JSON.stringify(stopMessage));
-        log('语音监听停止消息已发送', 'info');
+      } catch (e) {
+        log(`发送结束帧错误: ${e}`, 'error');
       }
       
-      // 更新对话状态
-      const listeningDuration = conversationState.listeningStartTime ? 
-        currentTime - conversationState.listeningStartTime : 0;
-      
-      setConversationState(prev => ({
-        ...prev,
-        isListening: false,
-        listeningDuration,
-        lastVoiceTime: currentTime,
-        vadState: VadState.SILENCE
-      }));
-
-      log(`语音监听已停止，监听时长: ${listeningDuration}ms`, 'success');
-      
-    } catch (error) {
-      log(`停止语音监听失败: ${error}`, 'error');
-      // 出错时重置状态
-      setConversationState(prev => ({
-        ...prev,
-        isListening: false,
-        vadState: VadState.ERROR
-      }));
+      // 发送结束消息
+      const stopMessage = {
+        type:'listen',
+        mode:'manual',
+        state:'stop',
+        timestamp: currentTime,
+        session_id: conversationState.sessionId
+      };
+      try {
+        wsRef.current.send(JSON.stringify(stopMessage));
+        log('语音监听结束消息已发送', 'info');
+      } catch (e) {
+        log(`发送结束消息错误: ${e}`, 'error');
+      }
     }
+    
+    // 更新对话状态
+    const listeningDuration = conversationState.listeningStartTime ? 
+      currentTime - conversationState.listeningStartTime : 0;
+    
+    setConversationState(prev => ({
+      ...prev,
+      isListening: false,
+      listeningDuration,
+      lastVoiceTime: currentTime,
+      vadState: VadState.SILENCE,
+      listeningStartTime: null
+    }));
+    
+    log(`语音监听已停止，监听时长: ${listeningDuration}ms`, 'success');
   };
 
   // 批量发送缓冲的音频数据函数已在前文定义
