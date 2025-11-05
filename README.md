@@ -55,3 +55,12 @@ python3 app.py
 
 浏览器打开： tour_backend/test/test_page.html
 ```
+
+
+## 这里可以添加自定义的API
+```
+tour_backend/core/api
+base_handler.py
+ota_handler.py
+vision_handler.py
+```

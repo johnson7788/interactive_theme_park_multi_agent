@@ -75,13 +75,17 @@ class OTAHandler(BaseHandler):
             else:
                 raise Exception("OTA请求设备ID为空")
 
-            client_id = request.headers.get("client-id", "")
-            if client_id:
-                self.logger.bind(tag=TAG).info(f"OTA请求ClientID: {client_id}")
-            else:
-                raise Exception("OTA请求ClientID为空")
-
+            # 解析请求数据
             data_json = json.loads(data)
+            
+            # Client-Id是可选的，如果没有则使用UUID或者Device-ID
+            client_id = request.headers.get("client-id", "")
+            if not client_id:
+                # 尝试从请求数据中获取UUID
+                client_id = data_json.get("uuid", device_id)
+                self.logger.bind(tag=TAG).info(f"未提供ClientID，使用: {client_id}")
+            else:
+                self.logger.bind(tag=TAG).info(f"OTA请求ClientID: {client_id}")
 
             server_config = self.config["server"]
             port = int(server_config.get("port", 8000))
@@ -163,6 +167,8 @@ class OTAHandler(BaseHandler):
                     "url": self._get_websocket_url(local_ip, port),
                     "token": token,
                 }
+                # 为了兼容某些客户端（如xiaozhi-webui），添加空的mqtt字段
+                return_json["mqtt"] = {}
                 self.logger.bind(tag=TAG).info(
                     f"未配置MQTT网关，为设备 {device_id} 下发WebSocket配置"
                 )
