@@ -7,6 +7,7 @@ import { initOpusEncoder, checkOpusLoaded, type OpusEncoderHandle, createOpusDec
 import { createStreamingContext, StreamingContext } from '@/lib/StreamingContext';
 import BlockingQueue from '@/lib/BlockingQueue';
 import { getUserByName, getNPCById, getCurrentDeviceNPC } from '@/lib/supabase';
+import { useAdvancedVad, VadState } from '@/hooks/use-advanced-vad';
 
 const SAMPLE_RATE = 16000;
 const CHANNELS = 1;
@@ -35,6 +36,82 @@ export default function Page() {
   const [deviceId, setDeviceId] = useState<string>(process.env.NEXT_PUBLIC_NPC_DEVICE_ID || '');
   // 新增NPC信息状态
   const [npcInfo, setNpcInfo] = useState<any>(null);
+  // 电话相关状态
+  const [isCalling, setIsCalling] = useState(false);
+  const [callStatus, setCallStatus] = useState('');
+  
+  // 初始化VAD检测
+  const { vadState, isSpeechDetected, startVad, stopVad, error: vadError } = useAdvancedVad({
+    sampleRate: SAMPLE_RATE,
+    threshold: 0.5,
+    onSpeechEndCallback: () => {
+      console.log('语音结束，准备发送语音数据');
+      // 在这里添加发送语音的逻辑
+      sendVoiceData();
+    },
+  });
+  
+  // 打电话功能
+  const startCall = async () => {
+    if (!userId) {
+      alert('请先输入您的名字');
+      return;
+    }
+    
+    setIsCalling(true);
+    setCallStatus('正在连接...');
+    
+    try {
+      // 首先检查是否已经连接OTA和WebSocket
+      if (!otaOk || !wsOk) {
+        setCallStatus('正在连接服务器...');
+        await connect();
+        
+        // 等待连接建立
+        let attempts = 0;
+        while ((!otaOk || !wsOk) && attempts < 30) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          attempts++;
+        }
+        
+        if (!otaOk || !wsOk) {
+          throw new Error('服务器连接超时，请检查网络连接');
+        }
+      }
+      
+      // 启动VAD检测
+      await startVad();
+      
+      // 检查VAD状态
+      if (vadState === VadState.ERROR) {
+        throw new Error(vadError || 'VAD初始化失败');
+      }
+      
+      // 设置通话状态
+      setCallStatus('通话中...');
+      
+      // 可以在这里触发与NPC的对话
+      addMessage('您好！我是阿派朗智能助手，很高兴为您服务。', false);
+      
+    } catch (error) {
+      console.error('启动电话失败:', error);
+      const errorMessage = error instanceof Error ? error.message : '未知错误';
+      setCallStatus(`连接失败: ${errorMessage}`);
+      setIsCalling(false);
+      
+      // 如果VAD初始化失败，显示详细错误信息
+      if (errorMessage.includes('Audio context') || errorMessage.includes('VAD')) {
+        alert(`语音检测初始化失败: ${errorMessage}\n\n请确保：\n1. 浏览器支持Web Audio API\n2. 已授予麦克风权限\n3. 页面通过HTTPS访问`);
+      }
+    }
+  };
+  
+  const endCall = () => {
+    setIsCalling(false);
+    setCallStatus('');
+    stopVad();
+    // 这里可以添加结束电话的额外逻辑
+  };
   
   // 新增状态管理
   const [childInfo, setChildInfo] = useState<any>(null);
@@ -144,6 +221,33 @@ export default function Page() {
 
     fetchNpcInfo();
   }, [deviceId]);
+
+  // 自动连接OTA（当页面加载且有用户信息时）
+  useEffect(() => {
+    const autoConnectOTA = async () => {
+      // 检查是否有保存的用户信息
+      const savedUserId = localStorage.getItem('userId');
+      const savedChildInfo = localStorage.getItem('childInfo');
+      
+      if (savedUserId && savedChildInfo && !showUserIdModal) {
+        try {
+          // 设置用户信息
+          setUserId(savedUserId);
+          setChildInfo(JSON.parse(savedChildInfo));
+          
+          // 延迟连接，确保组件完全加载
+          setTimeout(() => {
+            connect();
+          }, 1000);
+        } catch (error) {
+          console.error('自动连接OTA失败:', error);
+        }
+      }
+    };
+
+    // 页面加载后自动连接
+    autoConnectOTA();
+  }, [showUserIdModal]);
 
   // 用户ID输入处理
   const handleUserIdSubmit = async () => {
@@ -364,6 +468,8 @@ export default function Page() {
         log('WS 已断开', 'warning');
         setIsRecording(false);
         if (vizIdRef.current) cancelAnimationFrame(vizIdRef.current);
+
+        endConversation();
       };
 
       ws.onerror = (ev: any) => {
@@ -507,6 +613,8 @@ export default function Page() {
       return true;
     }
   }
+  
+  // 直接注册处理器，避免重复注册检查
   registerProcessor('audio-recorder-processor', AudioRecorderProcessor);
   `;
 
@@ -562,10 +670,12 @@ export default function Page() {
     src.connect(analyserRef.current);
     // 录音处理节点
     try {
+      // 预注册 AudioWorkletProcessor
       const blob = new Blob([workletCode], { type: 'application/javascript' });
       const url = URL.createObjectURL(blob);
       await ctx.audioWorklet.addModule(url);
       URL.revokeObjectURL(url);
+      
       const node = new (window as any).AudioWorkletNode(ctx, 'audio-recorder-processor');
       node.port.onmessage = (e: MessageEvent) => {
         if (e.data?.type === 'buffer') {
@@ -603,8 +713,8 @@ export default function Page() {
 
       // 把 node 存起来以便 stop
       (window as any).__recNode = node;
-    } catch {
-      log('AudioWorklet 不可用，请升级浏览器或使用回退方案（略）', 'warning');
+    } catch (error: any) {
+      log(`AudioWorklet 不可用: ${error.message}，请升级浏览器或使用回退方案（略）`, 'warning');
     }
   };
 
@@ -634,6 +744,32 @@ export default function Page() {
     } catch {}
 
     // 注意：不销毁编码器，因为是单例，可以复用
+  };
+
+  // 发送语音数据函数
+  const sendVoiceData = () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      log('WebSocket 未连接，无法发送语音数据', 'error');
+      return;
+    }
+
+    try {
+      // 发送语音结束标记
+      wsRef.current.send(JSON.stringify({ 
+        type: 'listen', 
+        mode: 'auto', 
+        state: 'stop',
+        timestamp: Date.now()
+      }));
+      
+      log('语音数据发送完成', 'success');
+      
+      // 可以在这里添加额外的语音处理逻辑
+      // 例如：发送语音识别结果、更新对话状态等
+      
+    } catch (error) {
+      log(`发送语音数据失败: ${error}`, 'error');
+    }
   };
 
   // ==== UI ====
@@ -781,21 +917,86 @@ export default function Page() {
                   <div>
                     <h1 className="text-xl md:text-2xl font-bold">
                       阿派朗智能助手
-                      {npcInfo?.name && <span className="ml-2 text-base">{npcInfo.name}</span>}
+                      {npcInfo?.name && <span className="ml-2">{npcInfo.name}</span>}
                     </h1>
                     <p className="text-sm opacity-80">与 {userId} 对话中</p>
                   </div>
                 </div>
-                <button
+                <div className="flex items-center space-x-4">
+                  {/* 调试信息按钮 */}
+                  <button
+                    onClick={() => setShowDebugInfo(!showDebugInfo)}
+                    className="bg-white bg-opacity-20 hover:bg-opacity-30 transition-all px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                    {showDebugInfo ? '隐藏调试' : '调试信息'}
+                  </button>
+                  
+                  {/* 去掉右上角的打电话按钮，只保留结束对话按钮 */}
+                  <button
                     onClick={endConversation}
                     className="bg-white bg-opacity-20 hover:bg-opacity-30 transition-all px-4 py-2 rounded-full text-sm font-medium"
-                >
-                  结束对话
-                </button>
+                  >
+                    结束对话
+                  </button>
+                </div>
               </header>
 
+              {/* 调试信息面板 */}
+              {showDebugInfo && (
+                <div className="bg-gray-50 border-b border-gray-200 p-4 max-h-60 overflow-y-auto">
+                  <div className="text-sm font-medium text-gray-700 mb-2">调试信息</div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                    <div className="bg-white p-2 rounded border border-gray-200">
+                      <div className="text-gray-500">设备MAC</div>
+                      <div className="text-gray-800 truncate">{deviceMac}</div>
+                    </div>
+                    <div className="bg-white p-2 rounded border border-gray-200">
+                      <div className="text-gray-500">客户端ID</div>
+                      <div className="text-gray-800 truncate">{clientId}</div>
+                    </div>
+                    <div className="bg-white p-2 rounded border border-gray-200">
+                      <div className="text-gray-500">OTA状态</div>
+                      <div className={otaOk ? 'text-green-600' : 'text-red-600'}>{otaOk ? '已连接' : '未连接'}</div>
+                    </div>
+                    <div className="bg-white p-2 rounded border border-gray-200">
+                      <div className="text-gray-500">WS状态</div>
+                      <div className={wsOk ? 'text-green-600' : 'text-red-600'}>{wsOk ? '已连接' : '未连接'}</div>
+                    </div>
+                    <div className="bg-white p-2 rounded border border-gray-200">
+                      <div className="text-gray-500">Opus状态</div>
+                      <div className={opusReady ? 'text-green-600' : 'text-orange-600'}>{opusReady ? '已加载' : '加载中...'}</div>
+                    </div>
+                    <div className="bg-white p-2 rounded border border-gray-200">
+                      <div className="text-gray-500">录音状态</div>
+                      <div className={isRecording ? 'text-red-600' : 'text-gray-600'}>{isRecording ? '录音中' : '未录音'}</div>
+                    </div>
+                    <div className="bg-white p-2 rounded border border-gray-200">
+                      <div className="text-gray-500">VAD状态</div>
+                      <div className={isSpeechDetected ? 'text-blue-600' : 'text-gray-600'}>{isSpeechDetected ? '检测到语音' : '静音'}</div>
+                    </div>
+                    <div className="bg-white p-2 rounded border border-gray-200">
+                      <div className="text-gray-500">通话状态</div>
+                      <div className={isCalling ? 'text-purple-600' : 'text-gray-600'}>{isCalling ? '通话中' : '未通话'}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <div className="text-gray-500 text-xs mb-1">服务器URL</div>
+                    <div className="bg-white p-2 rounded border border-gray-200 text-xs text-gray-800 break-all">
+                      {serverUrl || '未连接'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* 聊天内容区 */}
-              <main className="p-4 md:p-6 h-[calc(100vh-220px)] md:h-[calc(100vh-250px)] overflow-y-auto bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgdmlld0JveD0iMCAwIDYwIDYwIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMzLjMxNCAwIDYtMi42ODYgNi02cy0yLjY4Ni02LTYtNi02IDIuNjg2LTYgNiAyLjY4NiA2IDYgNnptMCAzMGMzLjMxNCAwIDYtMi42ODYgNi02cy0yLjY4Ni02LTYtNi02IDIuNjg2LTYgNiAyLjY4NiA2IDYgNnptLTE4LTE4YzMuMzE0IDAgNi0yLjY4NiA2LTZzLTIuNjg2LTYtNi02LTYgMi42ODYtNiA2IDIuNjg2IDYgNiA2em0wIDMGMzMuMzE0IDAgMzYgMi42ODYgMzYgNnMtMi42ODYgNi02IDYtNi0yLjY4Ni02LTYgMi42ODYtNiA2LTZ6bTE4IDBjMy4zMTQgMCA2LTIuNjg2IDYtNnMtMi42ODYtNi02LTYtNiAyLjY4Ni02IDYgMi42ODYgNiA2IDZ6bS0zNiAxOGMzLjMxNCAwIDYtMi42ODYgNi02cy0yLjY4Ni02LTYtNi02IDIuNjg2LTYgNiAyLjY4NiA2IDYgNnptMTggMzBjMy4zMTQgMCA2LTIuNjg2IDYtNnMtMi42ODYtNi02LTYtNiAyLjY4Ni02IDYgMi42ODYgNiA2IDZ6bTE4LTE4YzMuMzE0IDAgNi0yLjY4NiA2LTZzLTIuNjg2LTYtNi02LTYgMi42ODYtNiA2IDIuNjg2IDYgNiA2em0wIDBIMHY2MGgzNnYwSDB6bTE4IDE4VjBIMHYxOEgzNnoiLz48L2c+PC9zdmc+')] bg-repeat">
+              <main className={`p-4 md:p-6 overflow-y-auto bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgdmlld0JveD0iMCAwIDYwIDYwIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMzLjMxNCAwIDYtMi42ODYgNi02cy0yLjY4Ni02LTYtNi02IDIuNjg2LTYgNiAyLjY4NiA2IDYgNnptMCAzMGMzLjMxNCAwIDYtMi42ODYgNi02cy0yLjY4Ni02LTYtNi02IDIuNjg2LTYgNiAyLjY4NiA6IDYgNnptLTE4LTE4YzMuMzE0IDAgNi0yLjY4NiA2LTZzLTIuNjg2LTYtNi02LTYgMi42ODYtNiA2IDIuNjg2IDYgNiA2em0wIDMCMzMuMzE0IDAgMzYgMi42ODYgMzYgNnMtMi42ODYgNi02IDYtNi0yLjY4Ni02LTYgMi42ODYtNiA2LTZ6bTE4IDBjMy4zMTQgMCA2LTIuNjg2IDYtNnMtMi42ODYtNi02LTYtNiAyLjY4Ni02IDYgMi42ODYgNiA2IDZ6bS0zNiAxOGMzLjMxNCAwIDYtMi42ODYgNi02cy0yLjY8Ni02LTYtNiAyLjY8Ni02IDYgMi42ODYgNiA2IDZ6bTE4IDMwYzMuMzE0IDAgNi0yLjY8NiA2cy0yLjY4Ni02LTYtNi02IDIuNjg2LTYgNiAyLjY8NiA2IDZ6bTE4LTE4YzMuMzE0IDAgNi0yLjY8NiA2cy0yLjY8Ni02LTYtNiAyLjY8Ni02IDYgMi42ODYgNiA2IDZ6bTAgMEgwdjYwaDM2djBIMHptMTggMThWMEgwdjE4SDM2eiIvPjwvZz48L3N2Zz4=')] bg-repeat ${
+                showDebugInfo 
+                  ? 'h-[calc(100vh-220px-240px)] md:h-[calc(100vh-250px-240px)]' 
+                  : 'h-[calc(100vh-220px)] md:h-[calc(100vh-250px)]'
+              }`}>
                 <div className="space-y-4">
                   {conversation.length === 0 ? (
                       <div className="text-center py-8 text-gray-400">
@@ -838,26 +1039,32 @@ export default function Page() {
                     />
                   </div>
                   <button
-                      onClick={toggleRecording}
+                      onClick={isCalling ? endCall : startCall}
                       disabled={!wsOk}
-                      className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-purple-500 text-white hover:bg-purple-600'}`}
+                      className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+                        isCalling 
+                          ? 'bg-red-500 text-white animate-pulse' 
+                          : 'bg-purple-500 text-white hover:bg-purple-600'
+                      }`}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      {isRecording ? (
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" />
+                      {isCalling ? (
+                        // 终止图标（电话挂断）
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                       ) : (
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                        // 打电话图标
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                       )}
                     </svg>
                   </button>
                 </div>
-                {isRecording && (
-                    <div className="mt-3 bg-red-50 p-2 rounded-lg border border-red-100">
-                      <div className="flex items-center text-red-500">
+                {isCalling && (
+                    <div className="mt-3 bg-purple-50 p-2 rounded-lg border border-purple-100">
+                      <div className="flex items-center text-purple-500">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" />
                         </svg>
-                        <span className="text-sm font-medium">录音中，请说话...</span>
+                        <span className="text-sm font-medium">通话中，点击按钮结束通话</span>
                       </div>
                     </div>
                 )}
