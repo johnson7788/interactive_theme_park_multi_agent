@@ -8,6 +8,7 @@ export enum VadState {
     ERROR = 'error',
     SPEAKING = 'speaking',
     SILENCE = 'silence',
+    SPEECH_DETECTED = 'speech_detected',
 }
 
 interface VadConfig {
@@ -16,14 +17,16 @@ interface VadConfig {
     minSpeechFrames?: number;
     minSilenceFrames?: number;
     onSpeechEndCallback?: () => void; // 语音结束时的回调函数
+    onSpeechStartCallback?: () => void; // 语音开始时的回调函数
 }
 
-interface UseAdvancedVadReturn {
+export interface UseAdvancedVadReturn {
     vadState: VadState;
     isSpeechDetected: boolean;
     startVad: () => Promise<void>;
     stopVad: () => void;
     error: string | null;
+    currentVadStateRef: React.MutableRefObject<VadState>;
 }
 
 export const useAdvancedVad = (config: VadConfig = {}): UseAdvancedVadReturn => {
@@ -33,11 +36,20 @@ export const useAdvancedVad = (config: VadConfig = {}): UseAdvancedVadReturn => 
         minSpeechFrames = 3, // 增加最小语音帧数，减少误触发
         minSilenceFrames = 6, // 增加最小静音帧数，确保语音真正结束
         onSpeechEndCallback, // 语音结束时的回调函数
+        onSpeechStartCallback, // 语音开始时的回调函数
     } = config;
 
     const [vadState, setVadState] = useState<VadState>(VadState.NOT_INITIALIZED);
     const [isSpeechDetected, setIsSpeechDetected] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // 添加ref跟踪当前状态，避免React状态更新的异步问题
+    const currentVadStateRef = useRef<VadState>(VadState.NOT_INITIALIZED);
+
+    // 同步ref和state
+    useEffect(() => {
+        currentVadStateRef.current = vadState;
+    }, [vadState]);
 
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
@@ -126,7 +138,7 @@ export const useAdvancedVad = (config: VadConfig = {}): UseAdvancedVadReturn => 
 
             const vadOptions = {
                 ...defaultOptions,
-                audioContext: audioContext, // 明确传递audioContext
+                audioContext: undefined, // 此处传undefined，MicVAD会自动创建（因为MICVAD插件有bug）
                 getStream: getStream,
                 startOnLoad: false,
                 processorType: 'ScriptProcessor' as const, // 强制使用ScriptProcessor，避免Worklet加载问题
@@ -134,6 +146,10 @@ export const useAdvancedVad = (config: VadConfig = {}): UseAdvancedVadReturn => 
                     console.log('检测到语音开始');
                     setIsSpeechDetected(true);
                     setVadState(VadState.SPEAKING);
+                    // 调用语音开始回调
+                    if (onSpeechStartCallback) {
+                        onSpeechStartCallback();
+                    }
                 },
                 onSpeechEnd: () => {
                     console.log('检测到语音结束');
@@ -190,8 +206,10 @@ export const useAdvancedVad = (config: VadConfig = {}): UseAdvancedVadReturn => 
             // 启动VAD
             await vad.start();
 
-            console.log('VAD启动成功');
             setVadState(VadState.READY);
+            // 立即更新ref，避免状态异步更新导致的问题
+            currentVadStateRef.current = VadState.READY;
+            console.log('VAD启动成功，当前的VAD状态：', currentVadStateRef.current);
         } catch (err) {
             console.error('VAD初始化失败:', err);
             const errorMessage = err instanceof Error ? err.message : '未知错误';
@@ -254,5 +272,6 @@ export const useAdvancedVad = (config: VadConfig = {}): UseAdvancedVadReturn => 
         startVad,
         stopVad,
         error,
+        currentVadStateRef,
     };
 };

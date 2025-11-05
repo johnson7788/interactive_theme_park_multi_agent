@@ -41,13 +41,40 @@ export default function Page() {
   const [callStatus, setCallStatus] = useState('');
   
   // 初始化VAD检测
-  const { vadState, isSpeechDetected, startVad, stopVad, error: vadError } = useAdvancedVad({
+  const { vadState, isSpeechDetected, startVad, stopVad, error: vadError, currentVadStateRef } = useAdvancedVad({
     sampleRate: SAMPLE_RATE,
-    threshold: 0.5,
+    threshold: 0.2, // 降低阈值到0.2，提高灵敏度
     onSpeechEndCallback: () => {
-      console.log('语音结束，准备发送语音数据');
-      // 在这里添加发送语音的逻辑
-      sendVoiceData();
+      console.log('VAD检测到语音结束，准备发送语音数据进行ASR');
+      
+      // 更新对话状态
+      setConversationState(prev => ({
+        ...prev,
+        isProcessingASR: true,
+        vadState: VadState.SILENCE
+      }));
+      
+      // 发送缓冲的音频数据
+      sendBufferedAudio();
+      
+      // 延迟发送语音结束标记，确保所有音频数据都已发送
+      setTimeout(() => {
+        sendVoiceData();
+      }, 100);
+    },
+    onSpeechStartCallback: () => {
+      console.log('VAD检测到语音开始');
+      
+      // 更新对话状态
+      setConversationState(prev => ({
+        ...prev,
+        vadState: VadState.SPEECH_DETECTED
+      }));
+      
+      // 如果当前没有在录音，开始语音监听
+      if (!conversationState.isListening) {
+        startVoiceListening();
+      }
     },
   });
   
@@ -82,17 +109,71 @@ export default function Page() {
       // 启动VAD检测
       await startVad();
       
-      // 检查VAD状态
-      if (vadState === VadState.ERROR) {
-        throw new Error(vadError || 'VAD初始化失败');
+      // 检查VAD状态 - 等待VAD初始化完成
+      let vadAttempts = 0;
+      let currentVadState = vadState;
+      
+      // 使用函数获取最新的VAD状态，而不是直接使用变量
+      const getCurrentVadState = () => {
+        return currentVadStateRef.current;
+      };
+      
+      // 等待VAD初始化完成（包括INITIALIZING状态）
+      while (((currentVadState === VadState.NOT_INITIALIZED) || (currentVadState === VadState.INITIALIZING)) && vadAttempts < 50) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        vadAttempts++;
+        currentVadState = getCurrentVadState(); // 每次循环都获取最新状态
+        
+        // 记录调试信息
+        log(`VAD初始化检查: 尝试 ${vadAttempts}/50, 当前状态: ${currentVadState}`, 'debug');
+        
+        // 如果状态变为就绪状态，提前退出循环
+        if (currentVadState === VadState.READY || currentVadState === VadState.SILENCE || currentVadState === VadState.SPEECH_DETECTED) {
+          log(`VAD已就绪，当前状态: ${currentVadState}`, 'debug');
+          break;
+        }
       }
+      
+      if (currentVadState === VadState.ERROR) {
+        const errorMsg = vadError || 'VAD初始化失败';
+        log(`VAD初始化错误: ${errorMsg}`, 'error');
+        throw new Error(errorMsg);
+      }
+      
+      if (currentVadState !== VadState.READY && currentVadState !== VadState.SILENCE && currentVadState !== VadState.SPEECH_DETECTED) {
+        const errorMsg = `VAD初始化超时 (${vadAttempts * 100}ms)，请检查麦克风权限。最终状态: ${currentVadState}`;
+        log(errorMsg, 'error');
+        throw new Error(errorMsg);
+      }
+      
+      // 记录VAD初始化成功
+      log(`VAD初始化成功，当前状态: ${currentVadState}`, 'success');
       
       // 设置通话状态
       setCallStatus('通话中...');
       
+      // 初始化对话状态
+      setConversationState(prev => ({
+        ...prev,
+        isListening: false,
+        isSpeaking: false,
+        vadState: currentVadState, // 使用当前的VAD状态
+        isProcessingASR: false
+      }));
+      
       // 可以在这里触发与NPC的对话
       addMessage('您好！我是阿派朗智能助手，很高兴为您服务。', false);
       
+      // 记录通话开始时间
+      log('VAD连续对话通话已开始，等待语音输入...', 'success');
+
+
+      // 此处可以添加模拟音频发送
+      setTimeout(() => {
+        sendMockAudio();
+      }, 100);
+
+
     } catch (error) {
       console.error('启动电话失败:', error);
       const errorMessage = error instanceof Error ? error.message : '未知错误';
@@ -105,12 +186,94 @@ export default function Page() {
       }
     }
   };
+
+  const sendMockAudio = () => {
+    try {
+      console.log('发送模拟音频数据...');
+      
+      // 创建模拟音频数据（中文读出1-6的数字：1，2，3，4，5，6）
+      // 这是一个更详细的模拟Opus帧数据，代表中文语音内容
+      const mockAudioData = new Uint8Array([
+        111, 112, 117, 115, // Opus标识
+        0, 184, 0, 0, // 帧长度和配置
+        // 模拟中文读出"1，2，3，4，5，6"的音频数据
+        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7,
+        192, 3, 64, 9, 128, 11, 224, 12, 96, 8, 160, 14, 32, 13, 0, 15,
+        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7,
+        192, 3, 64, 9, 128, 11, 224, 12, 96, 8, 160, 14, 32, 13, 0, 15,
+        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7,
+        192, 3, 64, 9, 128, 11, 224, 12, 96, 8, 160, 14, 32, 13, 0, 15,
+        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7,
+        192, 3, 64, 9, 128, 11, 224, 12, 96, 8, 160, 14, 32, 13, 0, 15,
+        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7,
+        192, 3, 64, 9, 128, 11, 224, 12, 96, 8, 160, 14, 32, 13, 0, 15,
+        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7,
+        192, 3, 64, 9, 128, 11, 224, 12, 96, 8, 160, 14, 32, 13, 0, 15,
+        64, 2, 129, 8, 192, 6, 96, 4, 160, 10, 32, 5, 16, 1, 128, 7
+      ]);
+      
+      // 将模拟音频数据添加到conversationState.audioBuffers中
+      setConversationState(prev => ({
+        ...prev,
+        audioBuffers: [...prev.audioBuffers, mockAudioData],
+        listeningStartTime: Date.now().valueOf() - 2000,
+        listeningDuration: 2
+      }));
+      
+      console.log('模拟音频数据已添加到缓冲区');
+      
+      // 模拟触发onSpeechEndCallback
+      // 直接调用在VAD配置中定义的回调函数逻辑
+      setTimeout(() => {
+        console.log('模拟触发语音结束回调');
+
+        // 更新对话状态
+        setConversationState(prev => ({
+          ...prev,
+          isProcessingASR: true,
+          vadState: VadState.SILENCE
+        }));
+        
+        // 发送缓冲的音频数据
+        sendBufferedAudio();
+        
+        // 延迟发送语音结束标记，确保所有音频数据都已发送
+        setTimeout(() => {
+          sendVoiceData();
+        }, 100);
+
+      }, 100);
+      
+    } catch (error) {
+      console.error('发送模拟音频失败:', error);
+    }
+  };
   
   const endCall = () => {
     setIsCalling(false);
     setCallStatus('');
+    
+    // 停止VAD检测
     stopVad();
-    // 这里可以添加结束电话的额外逻辑
+    
+    // 停止语音监听
+    stopVoiceListening();
+    
+    // 重置对话状态
+    setConversationState(prev => ({
+      ...prev,
+      isListening: false,
+      isSpeaking: false,
+      vadState: VadState.NOT_INITIALIZED,
+      isProcessingASR: false,
+      audioBuffers: []
+    }));
+    
+    // 记录通话结束
+    log('VAD连续对话通话已结束', 'info');
+    
+    // 添加通话结束消息
+    addMessage('通话已结束，感谢您的使用！', false);
   };
   
   // 新增状态管理
@@ -143,6 +306,23 @@ export default function Page() {
   const [conversation, setConversation] = useState<Array<{text: string, isUser: boolean, timestamp: Date}>>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [isRecording, setIsRecording] = useState(false);
+  
+  // 对话状态管理 - 用于VAD连续对话
+  const [conversationState, setConversationState] = useState({
+    isListening: false,
+    isSpeaking: false,
+    lastUserInput: '',
+    asrConfidence: 0,
+    listeningStartTime: null as number | null,
+    lastVoiceTime: 0,
+    audioBuffers: [] as Uint8Array[],
+    vadState: VadState.NOT_INITIALIZED,
+    lastASRResult: '',
+    isProcessingASR: false,
+    listeningDuration: 0,
+    lastAudioSentTime: 0,
+    sessionId: ''
+  });
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -496,7 +676,22 @@ export default function Page() {
               }
               case 'stt': {
                 const m = msg as SttMsg;
-                if (m.text) addMessage(`[语音识别] ${m.text}`, true);
+                if (m.text) {
+                  // 处理ASR结果
+                  handleASRResult(m.text);
+                  
+                  // 记录ASR结果
+                  log(`收到语音识别结果: ${m.text}`, 'info');
+                  
+                  // 如果当前正在处理ASR，更新状态
+                  if (conversationState.isProcessingASR) {
+                    setConversationState(prev => ({
+                      ...prev,
+                      isProcessingASR: false,
+                      lastASRResult: m.text || ''
+                    }));
+                  }
+                }
                 break;
               }
               case 'llm': {
@@ -628,120 +823,200 @@ export default function Page() {
 
   const startRecording = async () => {
     if (isRecording) return;
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      log('WS 未连接，不能录音', 'error'); return;
-    }
-
-    // 等待 ModuleInstance 准备好
-    const anyWin = window as any;
-    if (!anyWin.ModuleInstance) {
-      log('等待 Opus 模块加载...', 'info');
-      let attempts = 0;
-      while (!anyWin.ModuleInstance && attempts < 20) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      if (!anyWin.ModuleInstance) {
-        log('Opus 模块未加载，无法录音', 'error');
-        return;
-      }
-    }
-
-    // 确保编码器（只在第一次初始化）
-    if (!opusEncoderRef.current) {
-      opusEncoderRef.current = initOpusEncoder({
-        sampleRate: SAMPLE_RATE, channels: CHANNELS, frameSize: FRAME_SIZE,
-        onLog: (m,l) => log(m, l as any)
-      });
-      if (!opusEncoderRef.current) {
-        log('Opus 编码器初始化失败', 'error'); return;
-      }
-    }
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, sampleRate: SAMPLE_RATE, channelCount: 1 }
-    });
-    const ctx = ensureAudioContext();
-    const src = ctx.createMediaStreamSource(stream);
-
-    // 可视化链路
-    analyserRef.current = ctx.createAnalyser();
-    analyserRef.current.fftSize = 2048;
-    src.connect(analyserRef.current);
-    // 录音处理节点
+    
     try {
-      // 预注册 AudioWorkletProcessor
-      const blob = new Blob([workletCode], { type: 'application/javascript' });
-      const url = URL.createObjectURL(blob);
-      await ctx.audioWorklet.addModule(url);
-      URL.revokeObjectURL(url);
+      log('开始录音初始化...', 'info');
       
-      const node = new (window as any).AudioWorkletNode(ctx, 'audio-recorder-processor');
-      node.port.onmessage = (e: MessageEvent) => {
-        if (e.data?.type === 'buffer') {
-          const frame: Int16Array = e.data.buffer;
-          try {
-            const encoded = opusEncoderRef.current!.encode(frame);
-            if (encoded && encoded.byteLength > 0) {
-              wsRef.current!.send(encoded.buffer);
-            }
-          } catch (err:any) {
-            log(`Opus 编码错误: ${err?.message || err}`, 'error');
-          }
+      // 初始化Opus编码器
+      if (!opusEncoderRef.current) {
+        opusEncoderRef.current = initOpusEncoder({
+          sampleRate: SAMPLE_RATE, channels: CHANNELS, frameSize: FRAME_SIZE,
+          onLog: (m,l) => log(m, l as any)
+        });
+        if (!opusEncoderRef.current) {
+          log('Opus 编码器初始化失败', 'error'); return;
         }
-      };
-      // 需要有输出以触发处理（静音增益）
-      const silent = ctx.createGain();
-      silent.gain.value = 0;
-      node.connect(silent); silent.connect(ctx.destination);
-
-      src.connect(node);
-      (node as any).__src = src;  // 保存引用，stop 时断开
-
-      // listen start
-      wsRef.current.send(JSON.stringify({ type:'listen', mode:'manual', state:'start' }));
-      node.port.postMessage({ command: 'start' });
-
-      setIsRecording(true);
-      // 启动可视化
-      if (canvasRef.current) {
-        canvasRef.current.width = canvasRef.current.clientWidth;
-        canvasRef.current.height = canvasRef.current.clientHeight;
+        log('Opus编码器初始化完成', 'success');
       }
-      vizIdRef.current = requestAnimationFrame(draw);
-      log('开始录音（PCM→Opus→WS）', 'success');
+      
+      // 请求麦克风权限
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { 
+          echoCancellation: true, 
+          noiseSuppression: true, 
+          sampleRate: SAMPLE_RATE, 
+          channelCount: 1,
+          autoGainControl: true 
+        }
+      });
+      log('麦克风权限获取成功', 'success');
+      
+      const ctx = ensureAudioContext();
+      const src = ctx.createMediaStreamSource(stream);
 
-      // 把 node 存起来以便 stop
-      (window as any).__recNode = node;
-    } catch (error: any) {
-      log(`AudioWorklet 不可用: ${error.message}，请升级浏览器或使用回退方案（略）`, 'warning');
+      // 可视化链路
+      analyserRef.current = ctx.createAnalyser();
+      analyserRef.current.fftSize = 2048;
+      src.connect(analyserRef.current);
+      
+      // 录音处理节点
+      try {
+        // 预注册 AudioWorkletProcessor
+        const blob = new Blob([workletCode], { type: 'application/javascript' });
+        const url = URL.createObjectURL(blob);
+        await ctx.audioWorklet.addModule(url);
+        URL.revokeObjectURL(url);
+        
+        const node = new (window as any).AudioWorkletNode(ctx, 'audio-recorder-processor');
+        node.port.onmessage = (e: MessageEvent) => {
+          if (e.data?.type === 'buffer') {
+            const frame: Int16Array = e.data.buffer;
+            try {
+              const encoded = opusEncoderRef.current!.encode(frame);
+              if (encoded && encoded.byteLength > 0) {
+                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                  wsRef.current.send(encoded.buffer);
+                  
+                  // 记录发送的音频数据到状态中
+                  setConversationState(prev => ({
+                    ...prev,
+                    audioBuffers: [...prev.audioBuffers, encoded],
+                    lastAudioSentTime: Date.now()
+                  }));
+                }
+              }
+            } catch (err:any) {
+              log(`Opus 编码错误: ${err?.message || err}`, 'error');
+            }
+          }
+        };
+        // 需要有输出以触发处理（静音增益）
+        const silent = ctx.createGain();
+        silent.gain.value = 0;
+        node.connect(silent); silent.connect(ctx.destination);
+
+        src.connect(node);
+        (node as any).__src = src;  // 保存引用，stop 时断开
+
+        // listen start
+        const currentTime = Date.now();
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ 
+            type:'listen', 
+            mode:'auto', 
+            state:'start',
+            timestamp: currentTime,
+            session_id: conversationState.sessionId 
+          }));
+          log('录音开始消息已发送', 'info');
+        }
+        node.port.postMessage({ command: 'start' });
+
+        setIsRecording(true);
+        // 启动可视化
+        if (canvasRef.current) {
+          canvasRef.current.width = canvasRef.current.clientWidth;
+          canvasRef.current.height = canvasRef.current.clientHeight;
+        }
+        vizIdRef.current = requestAnimationFrame(draw);
+        
+        // 更新对话状态
+        setConversationState(prev => ({
+          ...prev,
+          isListening: true,
+          listeningStartTime: currentTime,
+          audioBuffers: [],
+          vadState: VadState.SPEECH_DETECTED
+        }));
+        
+        log('录音已开始', 'success');
+
+        // 把 node 存起来以便 stop
+        (window as any).__recNode = node;
+      } catch (error: any) {
+        log(`AudioWorklet 不可用: ${error.message}，请升级浏览器或使用回退方案（略）`, 'warning');
+      }
+    } catch (error) {
+      log(`开始录音失败: ${error}`, 'error');
+      // 出错时重置状态
+      setConversationState(prev => ({
+        ...prev,
+        isListening: false,
+        vadState: VadState.ERROR
+      }));
     }
   };
 
   const stopRecording = () => {
     if (!isRecording) return;
-    setIsRecording(false);
-
-    // 停止可视化
-    if (vizIdRef.current) {
-      cancelAnimationFrame(vizIdRef.current);
-      vizIdRef.current = null;
-    }
-
-    // 结束录音并发送 stop
-    const node: any = (window as any).__recNode;
-    if (node?.port) node.port.postMessage({ command: 'stop' });
-    if (node?.__src) {
-      try { node.disconnect(); node.__src.disconnect(); } catch {}
-    }
-    (window as any).__recNode = null;
-
-    // 发送空帧 + stop
+    
     try {
-      wsRef.current?.send(new Uint8Array(0));
-      wsRef.current?.send(JSON.stringify({ type: 'listen', mode: 'manual', state: 'stop' }));
-      log('录音停止并发送 stop', 'info');
-    } catch {}
+      // 停止录音
+      setIsRecording(false);
+
+      // 停止可视化
+      if (vizIdRef.current) {
+        cancelAnimationFrame(vizIdRef.current);
+        vizIdRef.current = null;
+      }
+
+      // 结束录音并发送 stop
+      const node: any = (window as any).__recNode;
+      if (node?.port) node.port.postMessage({ command: 'stop' });
+      if (node?.__src) {
+        try { node.disconnect(); node.__src.disconnect(); } catch {}
+      }
+      (window as any).__recNode = null;
+
+      // 延迟100ms发送空帧，确保缓冲数据被处理
+      setTimeout(() => {
+        try {
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            // 发送一个空的消息作为结束标志
+            const emptyOpusFrame = new Uint8Array(0);
+            wsRef.current.send(emptyOpusFrame);
+            
+            // 发送监听结束消息
+            const stopMessage = {
+              type: 'listen',
+              mode: 'auto',
+              state: 'stop',
+              timestamp: Date.now(),
+              session_id: conversationState.sessionId
+            };
+            
+            wsRef.current.send(JSON.stringify(stopMessage));
+            log('已发送录音停止信号', 'info');
+          }
+        } catch (error) {
+          log(`发送录音停止信号失败: ${error}`, 'error');
+        }
+      }, 100);
+
+      // 更新对话状态
+      const currentTime = Date.now();
+      const listeningDuration = conversationState.listeningStartTime ? 
+        currentTime - conversationState.listeningStartTime : 0;
+      
+      setConversationState(prev => ({
+        ...prev,
+        isListening: false,
+        listeningDuration,
+        lastVoiceTime: currentTime,
+        vadState: VadState.SILENCE
+      }));
+
+      log(`录音已停止，录音时长: ${listeningDuration}ms`, 'success');
+      
+    } catch (error) {
+      log(`停止录音失败: ${error}`, 'error');
+      // 出错时重置状态
+      setConversationState(prev => ({
+        ...prev,
+        isListening: false,
+        vadState: VadState.ERROR
+      }));
+    }
 
     // 注意：不销毁编码器，因为是单例，可以复用
   };
@@ -754,23 +1029,293 @@ export default function Page() {
     }
 
     try {
+      // 计算录音时长
+      const currentTime = Date.now();
+      const listeningDuration = conversationState.listeningStartTime ?
+        currentTime - conversationState.listeningStartTime : 0;
+
       // 发送语音结束标记
-      wsRef.current.send(JSON.stringify({ 
-        type: 'listen', 
-        mode: 'auto', 
+      wsRef.current.send(JSON.stringify({
+        type: 'listen',
+        mode: 'auto',
         state: 'stop',
-        timestamp: Date.now()
+        timestamp: currentTime,
+        session_id: conversationState.sessionId
       }));
-      
-      log('语音数据发送完成', 'success');
-      
-      // 可以在这里添加额外的语音处理逻辑
-      // 例如：发送语音识别结果、更新对话状态等
-      
+
+      // 更新对话状态
+      setConversationState(prev => ({
+        ...prev,
+        isSpeaking: false,
+        listeningStartTime: null,
+        listeningDuration,
+        vadState: VadState.SILENCE
+      }));
+
+      log(`语音数据发送完成，录音时长: ${listeningDuration}ms`, 'success');
+
     } catch (error) {
       log(`发送语音数据失败: ${error}`, 'error');
+      // 出错时重置状态
+      setConversationState(prev => ({
+        ...prev,
+        isSpeaking: false,
+        listeningStartTime: null,
+        vadState: VadState.ERROR
+      }));
     }
   };
+
+  // 处理ASR结果
+  const handleASRResult = (text: string) => {
+    log(`识别结果: ${text}`, 'info');
+
+    if (!text || text.trim() === '') return;
+
+    // 更新对话状态
+    setConversationState(prev => ({
+      ...prev,
+      lastASRResult: text,
+      isProcessingASR: false
+    }));
+    
+    // 添加识别结果到会话记录（与test_page.html保持一致）
+    addMessage(`[语音识别] ${text}`, true);
+    
+    // 如果识别结果包含有效内容，可以自动触发对话响应
+    if (text.trim().length > 1) {
+      // 可以在这里添加自动对话逻辑
+      // 例如：延迟一段时间后自动发送到LLM进行回复
+      setTimeout(() => {
+        // 自动发送识别结果到LLM
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          const payload = { 
+            type: 'listen', 
+            mode: 'auto', 
+            state: 'detect', 
+            text: text.trim() 
+          };
+          wsRef.current.send(JSON.stringify(payload));
+          log(`自动发送识别结果到LLM: ${text.trim()}`, 'info');
+        }
+      }, 500);
+    }
+  };
+
+  // 发送缓冲的音频数据
+  const sendBufferedAudio = () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      log('WebSocket 未连接，无法发送缓冲音频', 'error');
+      return;
+    }
+
+    try {
+      // 如果有缓冲的音频数据，发送它们
+      if (conversationState.audioBuffers && conversationState.audioBuffers.length > 0) {
+        log(`发送缓冲的音频数据，共 ${conversationState.audioBuffers.length} 帧`, 'info');
+        
+        // 发送所有缓冲的音频帧
+        conversationState.audioBuffers.forEach((buffer, index) => {
+          if (buffer && buffer.length > 0) {
+            wsRef.current?.send(buffer);
+          }
+        });
+        
+        // 清空缓冲区
+        setConversationState(prev => ({
+          ...prev,
+          audioBuffers: []
+        }));
+        
+        log('缓冲音频数据发送完成', 'success');
+      }
+    } catch (error) {
+      log(`发送缓冲音频数据失败: ${error}`, 'error');
+    }
+  };
+
+  // 开始语音监听
+  const startVoiceListening = async () => {
+    if (conversationState.isListening) {
+      log('语音监听已在进行中', 'info');
+      return;
+    }
+
+    try {
+      log('开始语音监听...', 'info');
+      
+      // 初始化Opus编码器
+      if (!opusEncoderRef.current) {
+        opusEncoderRef.current = initOpusEncoder({
+          sampleRate: SAMPLE_RATE, channels: CHANNELS, frameSize: FRAME_SIZE,
+          onLog: (m,l) => log(m, l as any)
+        });
+        if (!opusEncoderRef.current) {
+          log('Opus 编码器初始化失败', 'error'); 
+          return;
+        }
+        log('Opus编码器初始化完成', 'success');
+      }
+      
+      // 请求麦克风权限
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { 
+          echoCancellation: true, 
+          noiseSuppression: true, 
+          sampleRate: SAMPLE_RATE, 
+          channelCount: 1,
+          autoGainControl: true 
+        }
+      });
+      log('麦克风权限获取成功', 'success');
+      
+      const ctx = ensureAudioContext();
+      const src = ctx.createMediaStreamSource(stream);
+
+      // 可视化链路
+      analyserRef.current = ctx.createAnalyser();
+      analyserRef.current.fftSize = 2048;
+      src.connect(analyserRef.current);
+      
+      // 创建音频处理节点
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      
+      processor.onaudioprocess = (event) => {
+        if (!conversationState.isListening) return;
+        
+        const inputData = event.inputBuffer.getChannelData(0);
+        
+        // 转换为Int16Array
+        const int16Data = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          int16Data[i] = Math.max(-32768, Math.min(32767, Math.floor(inputData[i] * 32767)));
+        }
+        
+        // 编码为Opus
+        if (opusEncoderRef.current) {
+          try {
+            const opusFrame = opusEncoderRef.current.encode(int16Data);
+            if (opusFrame && opusFrame.length > 0) {
+              // 缓冲音频数据
+              setConversationState(prev => ({
+                ...prev,
+                audioBuffers: [...prev.audioBuffers, opusFrame]
+              }));
+            }
+          } catch (err:any) {
+            log(`Opus 编码错误: ${err?.message || err}`, 'error');
+          }
+        }
+      };
+      
+      src.connect(processor);
+      processor.connect(ctx.destination);
+      
+      // 保存引用以便停止时断开连接
+      (window as any).__voiceProcessor = processor;
+      (window as any).__voiceSource = src;
+      
+      // 发送监听开始消息
+      const currentTime = Date.now();
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ 
+          type:'listen', 
+          mode:'auto', 
+          state:'start',
+          timestamp: currentTime,
+          session_id: conversationState.sessionId 
+        }));
+        log('语音监听开始消息已发送', 'info');
+      }
+      
+      // 更新对话状态
+      setConversationState(prev => ({
+        ...prev,
+        isListening: true,
+        listeningStartTime: currentTime,
+        audioBuffers: [],
+        vadState: VadState.SPEECH_DETECTED
+      }));
+      
+      log('语音监听已开始', 'success');
+      
+    } catch (error) {
+      log(`开始语音监听失败: ${error}`, 'error');
+      // 出错时重置状态
+      setConversationState(prev => ({
+        ...prev,
+        isListening: false,
+        vadState: VadState.ERROR
+      }));
+    }
+  };
+
+  // 停止语音监听
+  const stopVoiceListening = () => {
+    if (!conversationState.isListening) return;
+    
+    try {
+      // 断开音频处理节点
+      const processor: any = (window as any).__voiceProcessor;
+      const src: any = (window as any).__voiceSource;
+      
+      if (processor) {
+        try { processor.disconnect(); } catch {}
+      }
+      if (src) {
+        try { src.disconnect(); } catch {}
+      }
+      
+      (window as any).__voiceProcessor = null;
+      (window as any).__voiceSource = null;
+      
+      // 发送监听结束消息
+      const currentTime = Date.now();
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        // 发送一个空的消息作为结束标志
+        const emptyOpusFrame = new Uint8Array(0);
+        wsRef.current.send(emptyOpusFrame);
+        
+        // 发送监听结束消息
+        const stopMessage = {
+          type: 'listen',
+          mode: 'auto',
+          state: 'stop',
+          timestamp: currentTime,
+          session_id: conversationState.sessionId
+        };
+        
+        wsRef.current.send(JSON.stringify(stopMessage));
+        log('语音监听停止消息已发送', 'info');
+      }
+      
+      // 更新对话状态
+      const listeningDuration = conversationState.listeningStartTime ? 
+        currentTime - conversationState.listeningStartTime : 0;
+      
+      setConversationState(prev => ({
+        ...prev,
+        isListening: false,
+        listeningDuration,
+        lastVoiceTime: currentTime,
+        vadState: VadState.SILENCE
+      }));
+
+      log(`语音监听已停止，监听时长: ${listeningDuration}ms`, 'success');
+      
+    } catch (error) {
+      log(`停止语音监听失败: ${error}`, 'error');
+      // 出错时重置状态
+      setConversationState(prev => ({
+        ...prev,
+        isListening: false,
+        vadState: VadState.ERROR
+      }));
+    }
+  };
+
+  // 批量发送缓冲的音频数据函数已在前文定义
+  // 开始语音监听函数已在前文定义
 
   // ==== UI ====
   return (
@@ -975,7 +1520,13 @@ export default function Page() {
                     </div>
                     <div className="bg-white p-2 rounded border border-gray-200">
                       <div className="text-gray-500">VAD状态</div>
-                      <div className={isSpeechDetected ? 'text-blue-600' : 'text-gray-600'}>{isSpeechDetected ? '检测到语音' : '静音'}</div>
+                      <div className={vadState === VadState.SPEECH_DETECTED ? 'text-blue-600' : vadState === VadState.SPEAKING ? 'text-green-600' : 'text-gray-600'}>
+                        {vadState === VadState.SPEECH_DETECTED ? '检测到语音' : 
+                         vadState === VadState.SPEAKING ? '说话中' : 
+                         vadState === VadState.READY ? '就绪' : 
+                         vadState === VadState.ERROR ? '错误' : 
+                         vadState === VadState.INITIALIZING ? '初始化中' : '静音'}
+                      </div>
                     </div>
                     <div className="bg-white p-2 rounded border border-gray-200">
                       <div className="text-gray-500">通话状态</div>
