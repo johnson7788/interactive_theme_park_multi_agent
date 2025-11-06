@@ -171,11 +171,6 @@ export default function Page() {
       // 记录通话开始时间
       log('VAD连续对话通话已开始，等待语音输入...', 'success');
 
-      // 此处可以添加模拟音频发送
-      setTimeout(() => {
-        sendMockAudio();
-      }, 100);
-
     } catch (error) {
       console.error('启动电话失败:', error);
       const errorMessage = error instanceof Error ? error.message : '未知错误';
@@ -189,93 +184,6 @@ export default function Page() {
     }
   };
 
-  const sendMockAudio = () => {
-    try {
-      console.log('发送模拟音频数据...');
-      
-      // 确保Opus编码器已初始化
-      if (!opusEncoderRef.current) {
-        console.log('初始化Opus编码器...');
-        opusEncoderRef.current = initOpusEncoder({
-          sampleRate: SAMPLE_RATE, 
-          channels: CHANNELS, 
-          frameSize: FRAME_SIZE,
-        });
-      }
-      
-      // 创建模拟的PCM音频数据（中文读出1-6的数字）
-      // 这里创建一个Int16Array格式的PCM数据，模拟中文语音特征
-      const mockPCMData = new Int16Array(FRAME_SIZE * CHANNELS);
-      
-      // 为了模拟中文语音特征，我们创建一些波形数据
-      for (let i = 0; i < mockPCMData.length; i++) {
-        // 使用不同频率的正弦波叠加来模拟语音特征
-        const t = i / SAMPLE_RATE;
-        mockPCMData[i] = Math.floor(3000 * (
-          Math.sin(2 * Math.PI * 440 * t) + // 440Hz - 对应"1"的音调
-          0.7 * Math.sin(2 * Math.PI * 523 * t) + // 523Hz - 对应"2"的音调
-          0.5 * Math.sin(2 * Math.PI * 659 * t) + // 659Hz - 对应"3"的音调
-          0.4 * Math.sin(2 * Math.PI * 698 * t) + // 698Hz - 对应"4"的音调
-          0.3 * Math.sin(2 * Math.PI * 880 * t) + // 880Hz - 对应"5"的音调
-          0.2 * Math.sin(2 * Math.PI * 1047 * t)  // 1047Hz - 对应"6"的音调
-        ));
-      }
-      
-      // 使用Opus编码器对模拟PCM数据进行编码
-      const encoded = opusEncoderRef.current.encode(mockPCMData);
-      
-      if (encoded && encoded.byteLength > 0) {
-        console.log('模拟音频数据编码成功，大小:', encoded.byteLength, '字节');
-        
-        // 创建新的音频缓冲区
-        const newAudioBuffers = [...conversationState.audioBuffers, encoded, encoded, encoded, encoded, encoded];
-        
-        // 合并所有状态更新到一次setState调用
-        setConversationState(prev => ({
-          ...prev,
-          audioBuffers: newAudioBuffers,
-          lastAudioSentTime: Date.now(),
-          isProcessingASR: true,
-          vadState: VadState.SILENCE
-        }));
-
-        // 延迟发送语音结束标记，确保所有音频数据都已发送
-        setTimeout(() => {
-          console.log('发送请求前二次确认, 音频数据共', audioBuffersRef.current, '帧');
-
-          // TODO 未发送"语音开始"信号 detect
-          // 使用与服务端期望的listen消息格式
-          const listenMessage = {
-            type: 'listen',
-            mode: 'manual',  // 使用手动模式，由我们控制开始/停止
-            state: 'start'   // 表示开始录音
-          };
-
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            log(`发送录音开始消息: ${JSON.stringify(listenMessage)}`, 'info');
-            wsRef.current.send(JSON.stringify(listenMessage));
-          }
-
-          // 发送缓冲的音频数据
-          sendBufferedAudio( audioBuffersRef.current );
-
-          setTimeout(function (){
-            sendVoiceData();
-          }, 100)
-
-        }, 100);
-
-
-      }
-      else {
-        console.warn('模拟音频数据编码失败或为空');
-      }
-
-    } catch (error) {
-      console.error('发送模拟音频失败:', error);
-    }
-  };
-  
   const endCall = () => {
     setIsCalling(false);
     setCallStatus('');
@@ -1202,37 +1110,8 @@ export default function Page() {
       if (currentBuffers.length === 0) {
         log('没有录制到有效音频，发送空消息', 'warning');
         
-        // 发送空消息表示完成
-        const endMessage = {
-          type: 'listen',
-          mode: 'manual',
-          state: 'stop',
-          timestamp: Date.now(),
-          session_id: conversationState.sessionId
-        };
-        try {
-          wsRef.current.send(JSON.stringify(endMessage));
-          log('空音频结束消息已发送', 'info');
-          
-          // 更新对话状态
-          setConversationState(prev => ({
-            ...prev,
-            isSpeaking: false,
-            listeningStartTime: null,
-            vadState: VadState.SILENCE,
-            isProcessingASR: false,
-            audioBuffers: []
-          }));
-        } catch (error) {
-          log(`发送空音频结束消息失败: ${error}`, 'error');
-          // 出错时重置状态
-          setConversationState(prev => ({
-            ...prev,
-            isSpeaking: false,
-            listeningStartTime: null,
-            vadState: VadState.ERROR
-          }));
-        }
+        // 直接调用completeVoiceDataSending完成发送
+        completeVoiceDataSending();
         return;
       }
       
@@ -1266,7 +1145,7 @@ export default function Page() {
       const listeningDuration = conversationState.listeningStartTime ?
         currentTime - conversationState.listeningStartTime : 0;
 
-      // 发送一个空的消息作为结束标志
+      // 发送一个空的消息作为结束标志 - 这是标准方式
       const emptyOpusFrame = new Uint8Array(0);
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(emptyOpusFrame);
@@ -1296,7 +1175,8 @@ export default function Page() {
         listeningDuration,
         vadState: VadState.SILENCE,
         isProcessingASR: false,
-        lastVoiceTime: currentTime
+        lastVoiceTime: currentTime,
+        audioBuffers: []
       }));
 
       log(`语音数据发送完成，录音时长: ${listeningDuration}ms`, 'success');
