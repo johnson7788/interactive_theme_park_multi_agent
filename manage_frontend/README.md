@@ -77,11 +77,13 @@ manage_frontend/
     └── utils.ts          # 工具函数
 ```
 
-## API集成
+## 数据访问
 
-前端通过 `lib/api.ts` 中的 `apiClient` 与后端通信。
+**注意**：当前版本使用 Supabase 客户端直接连接数据库，而非通过后端 API。
 
-所有API请求会自动携带JWT Token，Token过期时自动跳转到登录页。
+- 所有数据操作通过 `lib/supabase.ts` 中的 Supabase 客户端完成
+- `lib/api.ts` 中的 `apiClient` 为备用方案（当前未使用）
+- 如需切换为后端 API，可在各页面中将 Supabase 调用替换为 `apiClient` 调用
 
 ## 开发说明
 
@@ -90,23 +92,96 @@ manage_frontend/
 1. 在 `app/admin/` 下创建新目录和 `page.tsx`
 2. 在 `components/admin/sidebar.tsx` 中添加导航链接
 
-### 调用API
+### 数据操作示例
 
 ```typescript
-import { apiClient } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 
-// GET请求
-const data = await apiClient.get('/themes');
+// 查询数据
+const { data, error } = await supabase
+  .from('game_themes')
+  .select('*')
+  .order('created_at', { ascending: false });
 
-// POST请求
-const result = await apiClient.post('/themes', { name: '新主题' });
+// 插入数据
+const { error } = await supabase
+  .from('game_themes')
+  .insert([{ name: '新主题', description: '描述' }]);
 
-// PUT请求
-await apiClient.put('/themes/1', { name: '更新主题' });
+// 更新数据
+const { error } = await supabase
+  .from('game_themes')
+  .update({ name: '更新主题' })
+  .eq('id', '主题ID');
 
-// DELETE请求
-await apiClient.delete('/themes/1');
+// 删除数据
+const { error } = await supabase
+  .from('game_themes')
+  .delete()
+  .eq('id', '主题ID');
 ```
+
+## 代码逻辑
+
+### 应用启动流程
+
+1. **入口页面** (`app/page.tsx`)：检查用户是否已登录
+   - 已登录 → 跳转到管理后台 (`/admin/dashboard`)
+   - 未登录 → 跳转到登录页 (`/login`)
+
+2. **根布局** (`app/layout.tsx`)：包裹整个应用
+   - 提供 `AuthProvider` 全局认证上下文
+   - 添加 Toast 消息提示组件
+
+### 认证机制
+
+1. **认证提供者** (`lib/auth.tsx`)：
+   - 使用 React Context 管理全局登录状态
+   - Token 存储在 `sessionStorage`（关闭标签页后失效）
+   - 提供 `login`、`logout`、`isAuthenticated` 方法
+
+2. **登录流程**：
+   - 用户输入账号密码 → 调用登录接口 → 保存 Token → 更新认证状态 → 跳转管理后台
+
+3. **路由保护** (`components/auth/protected-route.tsx`)：
+   - 包裹所有管理后台页面
+   - 未登录时自动跳转到登录页
+
+### 数据获取方式
+
+项目使用 **Supabase 客户端**直接连接数据库（而非通过后端API）：
+- 所有管理页面通过 `supabase.from('表名').select()` 获取数据
+- 增删改操作直接操作数据库表
+- 配置在 `lib/supabase.ts` 中
+
+### 页面结构
+
+**管理后台布局** (`app/admin/layout.tsx`)：
+- 左侧：固定侧边栏导航（`components/admin/sidebar.tsx`）
+- 右侧：内容区域，显示各个管理页面
+
+**主要管理页面**：
+- `dashboard`：数据统计，展示用户数、任务数等图表
+- `themes`：游戏主题管理（增删改查）
+- `npcs`：NPC角色管理
+- `tasks`：任务模板管理
+- `checkpoints`：打卡点配置
+- `users`：用户列表
+- `rewards`：奖励设置
+- `stories`：AI故事生成
+- `settings`：系统配置
+
+### 组件架构
+
+- **UI组件** (`components/ui/`)：基于 Radix UI 的通用组件（按钮、表格、对话框等）
+- **业务组件** (`components/admin/`, `components/auth/`)：业务逻辑组件
+- **工具函数** (`lib/utils.ts`)：通用工具方法
+
+### 状态管理
+
+- 使用 React Hooks（`useState`、`useEffect`）管理组件状态
+- 全局认证状态通过 Context API 管理
+- 页面级数据通过组件内状态 + Supabase 查询管理
 
 ## 构建生产版本
 
