@@ -8,7 +8,6 @@ import { createStreamingContext, StreamingContext } from '@/lib/StreamingContext
 import BlockingQueue from '@/lib/BlockingQueue';
 import { getUserByName, getNPCById, getCurrentDeviceNPC } from '@/lib/supabase';
 import { useAdvancedVad, VadState } from '@/hooks/use-advanced-vad';
-import { AudioPlayer } from '@/lib/audio/audio-player';
 import { VADIndicator } from '@/components/voice-chat/VADIndicator';
 
 const SAMPLE_RATE = 16000;
@@ -34,7 +33,6 @@ export default function Page() {
   const [userId, setUserId] = useState('测试张三');
   const [showUserIdModal, setShowUserIdModal] = useState(true);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
   // 从环境变量读取设备ID
   const [deviceId, setDeviceId] = useState<string>(process.env.NEXT_PUBLIC_NPC_DEVICE_ID || '');
   // 新增NPC信息状态
@@ -233,7 +231,6 @@ export default function Page() {
   const [connecting, setConnecting] = useState(false);
   const [opusReady, setOpusReady] = useState(false);
 
-  const [message, setMessage] = useState('');
   const [conversation, setConversation] = useState<Array<{text: string, isUser: boolean, timestamp: Date}>>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [isRecording, setIsRecording] = useState(false);
@@ -258,8 +255,6 @@ export default function Page() {
   // 使用ref来保存最新的isListening状态，以便在回调中立即访问
   const isListeningRef = useRef(false);
   const audioBuffersRef = useRef<Uint8Array[]>([]);
-  const audioPlayerRef = useRef<AudioPlayer | null>(null);
-  
   // 监听isListening状态的变化
   useEffect(() => {
     isListeningRef.current = conversationState.isListening;
@@ -708,15 +703,7 @@ export default function Page() {
     wsRef.current = null;
   };
 
-  // ==== 文本发送 ====
-  const sendText = () => {
-    const text = message.trim();
-    if (!text || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    const payload = { type: 'listen', mode: 'manual', state: 'detect', text };
-    wsRef.current.send(JSON.stringify(payload));
-    addMessage(text, true);
-    setMessage('');
-  };
+  // 文本发送功能已移除，只保留电话功能
 
   // ==== 录音：PCM→Opus→WS ====
   // 使用 AudioWorklet（可回退 ScriptProcessor）
@@ -1488,56 +1475,6 @@ export default function Page() {
     log(`语音监听已停止，监听时长: ${listeningDuration}ms`, 'success');
   };
 
-  // 播放当前录制的声音数据
-  const playRecordedAudio = async () => {
-    try {
-      // 设置播放状态为正在播放
-      setIsPlaying(true);
-      
-      // 初始化AudioPlayer（如果尚未初始化）
-      if (!audioPlayerRef.current) {
-        audioPlayerRef.current = new AudioPlayer();
-        await audioPlayerRef.current.initialize();
-      }
-      
-      // 获取当前录制的音频数据
-      const audioBuffers = conversationState.audioBuffers;
-      
-      if (!audioBuffers || audioBuffers.length === 0) {
-        log('没有录制的音频数据可播放', 'info');
-        setIsPlaying(false);
-        return;
-      }
-      
-      log(`开始播放 ${audioBuffers.length} 帧录制的音频数据`, 'info');
-      
-      // 播放每一帧音频数据
-      for (const buffer of audioBuffers) {
-        if (!isPlaying) {
-          // 如果用户停止了播放，中断播放循环
-          break;
-        }
-        await audioPlayerRef.current.playAudio(buffer);
-      }
-      
-      // 播放完成，重置播放状态
-      setIsPlaying(false);
-      log('音频播放完成', 'success');
-    } catch (error) {
-      log(`播放音频失败: ${error}`, 'error');
-      setIsPlaying(false);
-    }
-  };
-
-  // 停止播放音频
-  const stopPlayingAudio = () => {
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.stop();
-    }
-    setIsPlaying(false);
-    log('音频播放已停止', 'info');
-  };
-
   // 批量发送缓冲的音频数据函数已在前文定义
   // 开始语音监听函数已在前文定义
 
@@ -1692,23 +1629,6 @@ export default function Page() {
                   </div>
                 </div>
                 <div className="flex items-center space-x-4">
-                  {/* 播放按钮 */}
-                  <button
-                    onClick={isPlaying ? stopPlayingAudio : playRecordedAudio}
-                    className="bg-white bg-opacity-20 hover:bg-opacity-30 transition-all px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                      {isPlaying ? (
-                        // 暂停图标
-                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                      ) : (
-                        // 播放图标
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-                      )}
-                    </svg>
-                    {isPlaying ? '停止播放' : '播放录音'}
-                  </button>
-                  
                   {/* 调试信息按钮 */}
                   <button
                     onClick={() => setShowDebugInfo(!showDebugInfo)}
@@ -1720,13 +1640,7 @@ export default function Page() {
                     {showDebugInfo ? '隐藏调试' : '调试信息'}
                   </button>
                   
-                  {/* 去掉右上角的打电话按钮，只保留结束对话按钮 */}
-                  <button
-                    onClick={endConversation}
-                    className="bg-white bg-opacity-20 hover:bg-opacity-30 transition-all px-4 py-2 rounded-full text-sm font-medium"
-                  >
-                    结束对话
-                  </button>
+
                 </div>
               </header>
 
@@ -1797,6 +1711,16 @@ export default function Page() {
                   : 'h-[calc(100vh-220px)] md:h-[calc(100vh-250px)]'
               }`}>
                 <div className="space-y-4">
+                  {isCalling && (
+                    <div className="bg-purple-50 p-2 rounded-lg border border-purple-100 text-center">
+                      <div className="flex items-center justify-center text-purple-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-sm font-medium">通话中，点击按钮结束通话</span>
+                      </div>
+                    </div>
+                  )}
                   {conversation.length === 0 ? (
                       <div className="text-center py-8 text-gray-400">
                         <div className="mb-4 inline-block">
@@ -1826,21 +1750,11 @@ export default function Page() {
 
               {/* 底部输入区 */}
               <footer className="p-4 border-t border-gray-100 bg-gradient-to-t from-white to-gray-50">
-                <div className="flex items-center justify-between space-x-3">
-                  <div className="flex-1">
-                    <input
-                        type="text"
-                        value={message}
-                        onChange={(e) => setMessage(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && sendText()}
-                        className="w-full px-4 py-3 rounded-full border-2 border-purple-200 focus:border-purple-400 focus:outline-none transition-all bg-white shadow-sm"
-                        placeholder="输入消息..."
-                    />
-                  </div>
+                <div className="flex justify-center">
                   <button
                       onClick={isCalling ? endCall : startCall}
                       disabled={!wsOk}
-                      className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+                      className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${
                         isCalling 
                           ? 'bg-red-500 text-white animate-pulse' 
                           : 'bg-purple-500 text-white hover:bg-purple-600'
@@ -1857,16 +1771,7 @@ export default function Page() {
                     </svg>
                   </button>
                 </div>
-                {isCalling && (
-                    <div className="mt-3 bg-purple-50 p-2 rounded-lg border border-purple-100">
-                      <div className="flex items-center text-purple-500">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" />
-                        </svg>
-                        <span className="text-sm font-medium">通话中，点击按钮结束通话</span>
-                      </div>
-                    </div>
-                )}
+
               </footer>
             </div>
         )}
