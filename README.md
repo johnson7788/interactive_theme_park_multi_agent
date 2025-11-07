@@ -335,3 +335,6 @@ base_handler.py
 ota_handler.py
 vision_handler.py
 ```
+
+## 如何部署
+bash deploy.sh
