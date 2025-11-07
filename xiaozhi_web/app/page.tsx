@@ -604,7 +604,7 @@ export default function Page() {
 
       ws.onmessage = async (ev) => {
         try {
-          console.log('收到消息:', ev.data);
+          console.log("收到消息:", ev.data);
           if (typeof ev.data === 'string') {
             const msg = JSON.parse(ev.data) as HelloMsg | TtsStateMsg | LlmMsg | SttMsg | McpMsg | any;
             switch (msg.type) {
@@ -1045,12 +1045,8 @@ export default function Page() {
       }
       
       // 只有当所有帧都发送成功时才清空缓冲区
-      if (allSent) {
-        audioBuffersRef.current = []; // FIX: 清空 ref 缓冲区
-        setConversationState(prev => ({ ...prev, audioBuffers: [] })); // 保持状态同步（可选，用于 UI）
-        log('所有音频帧发送完成', 'success');
-      }
-      
+      log('所有音频帧发送完成', 'success');
+
       return allSent;
     } catch (error: any) {
       log(`发送缓冲音频数据失败: ${error?.message || error}`, 'error');
@@ -1096,7 +1092,9 @@ export default function Page() {
     
     try {
       // 2. 获取缓冲区数据
-      const currentBuffers = audioBuffersRef.current; // FIX: 从 ref 中获取最新的缓冲区数据      
+      const currentBuffers = [...audioBuffersRef.current]; // 创建副本
+      // 清空原始缓冲区，确保新的语音不会混入旧数据
+      audioBuffersRef.current = [];
 
       if (currentBuffers.length === 0) {
         log('没有录制到有效音频，发送空消息', 'warning');
