@@ -8,6 +8,8 @@ import { createStreamingContext, StreamingContext } from '@/lib/StreamingContext
 import BlockingQueue from '@/lib/BlockingQueue';
 import { getUserByName, getNPCById, getCurrentDeviceNPC } from '@/lib/supabase';
 import { useAdvancedVad, VadState } from '@/hooks/use-advanced-vad';
+import { AudioPlayer } from '@/lib/audio/audio-player';
+import { VADIndicator } from '@/components/voice-chat/VADIndicator';
 
 const SAMPLE_RATE = 16000;
 const CHANNELS = 1;
@@ -32,6 +34,7 @@ export default function Page() {
   const [userId, setUserId] = useState('测试张三');
   const [showUserIdModal, setShowUserIdModal] = useState(true);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   // 从环境变量读取设备ID
   const [deviceId, setDeviceId] = useState<string>(process.env.NEXT_PUBLIC_NPC_DEVICE_ID || '');
   // 新增NPC信息状态
@@ -43,9 +46,11 @@ export default function Page() {
   // 初始化VAD检测
   const { vadState, isSpeechDetected, startVad, stopVad, error: vadError, currentVadStateRef } = useAdvancedVad({
     sampleRate: SAMPLE_RATE,
-    threshold: 0.2, // 降低阈值到0.2，提高灵敏度
+    threshold: 0.3, // 调整阈值到0.3，平衡灵敏度和准确性
+    minSpeechFrames: 3, // 减少最小语音帧数，提高响应速度
+    minSilenceFrames: 5, // 适当减少最小静音帧数，提高响应速度
     onSpeechEndCallback: () => {
-      console.log('VAD检测到语音结束，准备发送语音数据进行ASR');
+      console.log('VAD检测到语音结束');
       
       // 更新对话状态
       setConversationState(prev => ({
@@ -54,25 +59,16 @@ export default function Page() {
         vadState: VadState.SILENCE
       }));
       
-      // 发送缓冲的音频数据
-      sendBufferedAudio();
-      
-      // 延迟发送语音结束标记，确保所有音频数据都已发送
-      setTimeout(() => {
-        sendVoiceData();
-      }, 100);
+      sendVoiceData();
     },
     onSpeechStartCallback: () => {
-      console.log('VAD检测到语音开始');
-      
+      console.log('VAD检测到语音开始, 监听状态：', isListeningRef.current);
+
       // 更新对话状态
       setConversationState(prev => ({
         ...prev,
         vadState: VadState.SPEECH_DETECTED
       }));
-
-      console.log('conversationState.isListening (state值，可能是旧的)', conversationState.isListening);
-      console.log('isListeningRef.current (ref值，总是最新的)', isListeningRef.current);
 
       // 如果当前没有在录音，开始语音监听
       // 使用ref中的最新状态值，而不是直接使用state
@@ -159,7 +155,7 @@ export default function Page() {
       // 初始化对话状态
       setConversationState(prev => ({
         ...prev,
-        isListening: true,
+        isListening: false, // 初始时不处于监听状态，等待VAD检测到语音后才开始监听
         isSpeaking: false,
         vadState: currentVadState, // 使用当前的VAD状态
         isProcessingASR: false
@@ -262,6 +258,7 @@ export default function Page() {
   // 使用ref来保存最新的isListening状态，以便在回调中立即访问
   const isListeningRef = useRef(false);
   const audioBuffersRef = useRef<Uint8Array[]>([]);
+  const audioPlayerRef = useRef<AudioPlayer | null>(null);
   
   // 监听isListening状态的变化
   useEffect(() => {
@@ -607,6 +604,7 @@ export default function Page() {
 
       ws.onmessage = async (ev) => {
         try {
+          console.log('收到消息:', ev.data);
           if (typeof ev.data === 'string') {
             const msg = JSON.parse(ev.data) as HelloMsg | TtsStateMsg | LlmMsg | SttMsg | McpMsg | any;
             switch (msg.type) {
@@ -793,9 +791,8 @@ export default function Page() {
         audio: { 
           echoCancellation: true, 
           noiseSuppression: true, 
-          sampleRate: SAMPLE_RATE, 
-          channelCount: 1,
-          autoGainControl: true 
+          sampleRate: 16000, 
+          channelCount: 1
         }
       });
       log('麦克风权限获取成功', 'success');
@@ -852,7 +849,7 @@ export default function Page() {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ 
             type:'listen', 
-            mode:'auto', 
+            mode:'manual', 
             state:'start',
             timestamp: currentTime,
             session_id: conversationState.sessionId 
@@ -921,14 +918,10 @@ export default function Page() {
       setTimeout(() => {
         try {
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            // 发送一个空的消息作为结束标志
-            const emptyOpusFrame = new Uint8Array(0);
-            wsRef.current.send(emptyOpusFrame);
-            
             // 发送监听结束消息
             const stopMessage = {
               type: 'listen',
-              mode: 'auto',
+              mode: 'manual',
               state: 'stop',
               timestamp: Date.now(),
               session_id: conversationState.sessionId
@@ -1015,7 +1008,7 @@ export default function Page() {
             
             try {
               // 将Uint8Array转换为base64
-              const base64String = arrayBufferToBase64(buffer.buffer);
+              const base64String = arrayBufferToBase64(buffer.buffer as ArrayBuffer);
               if (base64String) {
                 const base64Message = {
                   type: 'audio_chunk',
@@ -1053,10 +1046,8 @@ export default function Page() {
       
       // 只有当所有帧都发送成功时才清空缓冲区
       if (allSent) {
-        setConversationState(prev => ({
-          ...prev,
-          audioBuffers: []
-        }));
+        audioBuffersRef.current = []; // FIX: 清空 ref 缓冲区
+        setConversationState(prev => ({ ...prev, audioBuffers: [] })); // 保持状态同步（可选，用于 UI）
         log('所有音频帧发送完成', 'success');
       }
       
@@ -1105,8 +1096,8 @@ export default function Page() {
     
     try {
       // 2. 获取缓冲区数据
-      const currentBuffers = conversationState.audioBuffers;
-      
+      const currentBuffers = audioBuffersRef.current; // FIX: 从 ref 中获取最新的缓冲区数据      
+
       if (currentBuffers.length === 0) {
         log('没有录制到有效音频，发送空消息', 'warning');
         
@@ -1225,7 +1216,16 @@ export default function Page() {
     }
 
     try {
-      log('开始语音监听...', 'info');
+      // 更新对话状态
+      setConversationState(prev => ({ 
+        ...prev, 
+        isListening: true, 
+        listeningStartTime: Date.now(), 
+        vadState: VadState.SPEECH_DETECTED, 
+        audioBuffers: [] // 清空之前的缓冲区
+      }));
+
+      log('语音监听已开始', 'success');
       
       // 初始化Opus编码器
       if (!opusEncoderRef.current) {
@@ -1276,10 +1276,11 @@ export default function Page() {
               const encoded = opusEncoderRef.current!.encode(frame);
               if (encoded && encoded.byteLength > 0) {
                 // 缓冲音频数据
-                setConversationState(prev => ({
-                  ...prev,
-                  audioBuffers: [...prev.audioBuffers, encoded],
-                  lastAudioSentTime: Date.now()
+                audioBuffersRef.current.push(encoded); // FIX: 立即更新 ref，确保数据完整性
+
+                setConversationState(prev => ({ 
+                  ...prev, 
+                  lastAudioSentTime: Date.now() // 仅更新时间/其他属性，避免大数组频繁触发状态更新
                 }));
               }
             } catch (err:any) {
@@ -1489,6 +1490,56 @@ export default function Page() {
     log(`语音监听已停止，监听时长: ${listeningDuration}ms`, 'success');
   };
 
+  // 播放当前录制的声音数据
+  const playRecordedAudio = async () => {
+    try {
+      // 设置播放状态为正在播放
+      setIsPlaying(true);
+      
+      // 初始化AudioPlayer（如果尚未初始化）
+      if (!audioPlayerRef.current) {
+        audioPlayerRef.current = new AudioPlayer();
+        await audioPlayerRef.current.initialize();
+      }
+      
+      // 获取当前录制的音频数据
+      const audioBuffers = conversationState.audioBuffers;
+      
+      if (!audioBuffers || audioBuffers.length === 0) {
+        log('没有录制的音频数据可播放', 'info');
+        setIsPlaying(false);
+        return;
+      }
+      
+      log(`开始播放 ${audioBuffers.length} 帧录制的音频数据`, 'info');
+      
+      // 播放每一帧音频数据
+      for (const buffer of audioBuffers) {
+        if (!isPlaying) {
+          // 如果用户停止了播放，中断播放循环
+          break;
+        }
+        await audioPlayerRef.current.playAudio(buffer);
+      }
+      
+      // 播放完成，重置播放状态
+      setIsPlaying(false);
+      log('音频播放完成', 'success');
+    } catch (error) {
+      log(`播放音频失败: ${error}`, 'error');
+      setIsPlaying(false);
+    }
+  };
+
+  // 停止播放音频
+  const stopPlayingAudio = () => {
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.stop();
+    }
+    setIsPlaying(false);
+    log('音频播放已停止', 'info');
+  };
+
   // 批量发送缓冲的音频数据函数已在前文定义
   // 开始语音监听函数已在前文定义
 
@@ -1643,6 +1694,23 @@ export default function Page() {
                   </div>
                 </div>
                 <div className="flex items-center space-x-4">
+                  {/* 播放按钮 */}
+                  <button
+                    onClick={isPlaying ? stopPlayingAudio : playRecordedAudio}
+                    className="bg-white bg-opacity-20 hover:bg-opacity-30 transition-all px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                      {isPlaying ? (
+                        // 暂停图标
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                      ) : (
+                        // 播放图标
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                      )}
+                    </svg>
+                    {isPlaying ? '停止播放' : '播放录音'}
+                  </button>
+                  
                   {/* 调试信息按钮 */}
                   <button
                     onClick={() => setShowDebugInfo(!showDebugInfo)}
@@ -1666,7 +1734,7 @@ export default function Page() {
 
               {/* 调试信息面板 */}
               {showDebugInfo && (
-                <div className="bg-gray-50 border-b border-gray-200 p-4 max-h-60 overflow-y-auto">
+                <div className="bg-gray-50 border-b border-gray-200 p-4 max-h-96 overflow-y-auto">
                   <div className="text-sm font-medium text-gray-700 mb-2">调试信息</div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                     <div className="bg-white p-2 rounded border border-gray-200">
@@ -1712,6 +1780,13 @@ export default function Page() {
                     <div className="text-gray-500 text-xs mb-1">服务器URL</div>
                     <div className="bg-white p-2 rounded border border-gray-200 text-xs text-gray-800 break-all">
                       {serverUrl || '未连接'}
+                    </div>
+                  </div>
+                  {/* VAD Indicator */}
+                  <div className="mt-3">
+                    <div className="text-gray-500 text-xs mb-1">VAD状态指示器</div>
+                    <div className="bg-white p-2 rounded border border-gray-200">
+                      <VADIndicator />
                     </div>
                   </div>
                 </div>

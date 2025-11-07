@@ -143,7 +143,6 @@ export const useAdvancedVad = (config: VadConfig = {}): UseAdvancedVadReturn => 
                 startOnLoad: false,
                 processorType: 'ScriptProcessor' as const, // 强制使用ScriptProcessor，避免Worklet加载问题
                 onSpeechStart: () => {
-                    console.log('检测到语音开始');
                     setIsSpeechDetected(true);
                     setVadState(VadState.SPEAKING);
                     // 调用语音开始回调
@@ -152,7 +151,6 @@ export const useAdvancedVad = (config: VadConfig = {}): UseAdvancedVadReturn => 
                     }
                 },
                 onSpeechEnd: () => {
-                    console.log('检测到语音结束');
                     setIsSpeechDetected(false);
                     setVadState(VadState.SILENCE);
                     // 调用语音结束回调
@@ -169,11 +167,11 @@ export const useAdvancedVad = (config: VadConfig = {}): UseAdvancedVadReturn => 
                     // 可选：处理每一帧的VAD概率
                 },
                 positiveSpeechThreshold: threshold,
-                negativeSpeechThreshold: 0.5, // 提高负向阈值，减少误触发
-                minSpeechFrames: minSpeechFrames, // 最小语音帧数
-                minSilenceFrames: minSilenceFrames, // 最小静音帧数
-                preSpeechPadFrames: 2, // 语音前填充帧数
-                redemptionFrames: 10, // 增加恢复帧数，提高稳定性
+                negativeSpeechThreshold: 0.6, // 适当降低负向阈值，平衡误触发和漏检
+                minSpeechFrames: 3, // 减少最小语音帧数，提高响应速度
+                minSilenceFrames: 5, // 适当减少最小静音帧数，提高响应速度
+                preSpeechPadFrames: 1, // 减少语音前填充帧数
+                redemptionFrames: 2, // 减少恢复帧数，提高响应速度
                 // 使用public目录下已有的silero_vad_legacy.onnx文件
                 modelURL: '/silero_vad_legacy.onnx',
                 // 配置onnxruntime-web路径

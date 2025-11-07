@@ -31,6 +31,7 @@ export class Application {
   private protocol: Protocol | null = null;
   private audioRecorder: AudioRecorder;
   private audioPlayer: AudioPlayer;
+  private audioBuffer: Float32Array;
 
   private deviceState: DeviceState = DeviceState.IDLE;
   private listeningMode: ListeningMode = ListeningMode.AUTO_STOP;
@@ -44,6 +45,7 @@ export class Application {
   private constructor() {
     this.audioRecorder = new AudioRecorder();
     this.audioPlayer = new AudioPlayer();
+    this.audioBuffer = new Float32Array(0);
   }
 
   static getInstance(): Application {
@@ -225,14 +227,39 @@ export class Application {
   }
 
   private async startAudioRecording(): Promise<void> {
+    // 重置音频缓冲区
+    this.audioBuffer = new Float32Array(0);
+    
     this.audioRecorder.onAudioData(async (audioData) => {
       if (this.protocol && this.deviceState === DeviceState.LISTENING) {
-        const pcm16Data = this.floatTo16BitPCM(audioData);
-        await this.protocol.sendAudio(pcm16Data);
+        // 将新的音频数据追加到缓冲区
+        const newBuffer = new Float32Array(this.audioBuffer.length + audioData.length);
+        newBuffer.set(this.audioBuffer);
+        newBuffer.set(audioData, this.audioBuffer.length);
+        this.audioBuffer = newBuffer;
+        
+        // 检查是否有足够的数据进行处理（16000Hz, 60ms = 960个采样点）
+        const samplesPerFrame = 960; // 60ms @ 16kHz
+        
+        while (this.audioBuffer.length >= samplesPerFrame) {
+          // 从缓冲区取出一帧数据
+          const frameData = this.audioBuffer.slice(0, samplesPerFrame);
+          this.audioBuffer = this.audioBuffer.slice(samplesPerFrame);
+          
+          // 转换为16位PCM数据并发送
+          const pcm16Data = this.floatTo16BitPCM(frameData);
+          await this.protocol.sendAudio(pcm16Data);
+        }
       }
     });
 
-    await this.audioRecorder.start();
+    const started = await this.audioRecorder.start();
+    if (!started) {
+      console.error('Failed to start audio recording');
+      return;
+    }
+    
+    console.log('Audio recording started successfully');
   }
 
   private stopAudioRecording(): void {

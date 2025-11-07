@@ -1,10 +1,12 @@
 import { AudioConfig } from '@/lib/constants';
+import { createOpusDecoder, OpusDecoderHandle } from '@/lib/opus';
 
 export class AudioPlayer {
   private audioContext: AudioContext | null = null;
   private audioQueue: AudioBuffer[] = [];
   private isPlaying: boolean = false;
   private currentSource: AudioBufferSourceNode | null = null;
+  private opusDecoder: OpusDecoderHandle | null = null;
 
   async initialize(): Promise<void> {
     if (!this.audioContext) {
@@ -16,6 +18,19 @@ export class AudioPlayer {
     if (this.audioContext.state === 'suspended') {
       await this.audioContext.resume();
     }
+
+    // 初始化Opus解码器
+    if (!this.opusDecoder) {
+      try {
+        this.opusDecoder = createOpusDecoder({
+          sampleRate: AudioConfig.INPUT_SAMPLE_RATE,
+          channels: AudioConfig.CHANNELS,
+          frameSize: (AudioConfig.INPUT_SAMPLE_RATE * AudioConfig.FRAME_DURATION) / 1000
+        });
+      } catch (error) {
+        console.error('Failed to initialize Opus decoder:', error);
+      }
+    }
   }
 
   async playAudio(audioData: Uint8Array): Promise<void> {
@@ -24,7 +39,7 @@ export class AudioPlayer {
     }
 
     try {
-      const audioBuffer = await this.decodeAudioData(audioData);
+      const audioBuffer = await this.decodeOpusAudioData(audioData);
       if (audioBuffer) {
         this.audioQueue.push(audioBuffer);
         if (!this.isPlaying) {
@@ -36,15 +51,38 @@ export class AudioPlayer {
     }
   }
 
-  private async decodeAudioData(audioData: Uint8Array): Promise<AudioBuffer | null> {
+  private async decodeOpusAudioData(audioData: Uint8Array): Promise<AudioBuffer | null> {
     if (!this.audioContext) {
       return null;
     }
 
     try {
-      return await this.audioContext.decodeAudioData(audioData.buffer.slice(0));
+      // 首先尝试使用Opus解码（录制的音频是Opus编码的）
+      if (this.opusDecoder) {
+        // 解码Opus数据为Int16 PCM
+        const pcmData = this.opusDecoder.decode(audioData);
+        
+        // 将Int16转换为Float32
+        const float32Data = new Float32Array(pcmData.length);
+        for (let i = 0; i < pcmData.length; i++) {
+          float32Data[i] = pcmData[i] / 32768; // 归一化到[-1, 1]范围
+        }
+        
+        // 创建AudioBuffer
+        const audioBuffer = this.audioContext.createBuffer(
+          AudioConfig.CHANNELS,
+          float32Data.length,
+          AudioConfig.INPUT_SAMPLE_RATE
+        );
+        audioBuffer.copyToChannel(float32Data, 0);
+        
+        return audioBuffer;
+      } else {
+        console.error('Opus decoder not initialized');
+        return null;
+      }
     } catch (error) {
-      console.error('Failed to decode audio:', error);
+      console.error('Failed to decode Opus audio:', error);
       return null;
     }
   }
@@ -93,6 +131,11 @@ export class AudioPlayer {
     if (this.audioContext) {
       await this.audioContext.close();
       this.audioContext = null;
+    }
+    // 释放Opus解码器资源
+    if (this.opusDecoder && this.opusDecoder.destroy) {
+      this.opusDecoder.destroy();
+      this.opusDecoder = null;
     }
   }
 }
