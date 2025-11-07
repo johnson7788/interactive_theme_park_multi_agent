@@ -27,6 +27,191 @@ pnmp dev
 
 > 本项目供学习交流使用，如果有问题欢迎联系 zamyang@qq.com
 
+## 代码逻辑
+
+### 系统架构
+
+**三层架构**：
+1. **前端（Vue3）**：用户界面和交互
+2. **代理后端（Python FastAPI）**：WebSocket 代理服务器
+3. **小智后端（tour_backend）**：语音处理服务
+
+**数据流向**：
+```
+前端 <--WebSocket--> 代理后端 <--WebSocket--> tour_backend
+```
+
+### 应用启动流程
+
+1. **后端启动** (`backend/main.py`)：
+   - 加载配置文件（`config/config.json`）
+   - 初始化 Opus 库（Windows 需要手动加载 DLL）
+   - 启动 WebSocket 代理服务器（独立进程）
+   - 启动 FastAPI HTTP 服务器（提供配置接口）
+
+2. **前端启动** (`src/main.ts`)：
+   - 创建 Vue 应用实例
+   - 初始化 Pinia 状态管理
+   - 挂载应用组件
+
+3. **应用初始化** (`src/App.vue`)：
+   - 从本地存储加载配置
+   - 如果本地配置不存在，从后端获取配置
+   - 建立 WebSocket 连接（连接到代理后端）
+
+### WebSocket 代理机制
+
+**代理后端** (`backend/app/proxy/websocket_proxy.py`)：
+- 作为前端和 `tour_backend` 之间的中间层
+- 处理音频格式转换（PCM ↔ Opus）
+- 管理设备认证和 OTA 配置
+- 自动获取 MAC 地址作为设备 ID
+
+**代理流程**：
+1. 前端连接代理后端（`ws://localhost:5000`）
+2. 代理后端连接 `tour_backend`（从配置读取）
+3. 双向转发消息（文本和音频）
+4. 音频数据在代理层进行编码/解码
+
+### 状态机管理
+
+**对话状态** (`src/services/ChatStateManager.ts`)：
+- `IDLE`：空闲状态，等待用户输入
+- `USER_SPEAKING`：用户正在说话
+- `AI_SPEAKING`：AI 正在回复
+
+**状态转换**：
+- `IDLE` → `USER_SPEAKING`：检测到用户音频电平超过阈值
+- `USER_SPEAKING` → `AI_SPEAKING`：用户停止说话（静音超时）
+- `AI_SPEAKING` → `USER_SPEAKING`：用户打断 AI（音频电平超过中断阈值）
+
+**状态机特点**：
+- 每个状态有 `onEnter`、`onExit`、`handleAudioLevel` 方法
+- 状态转换时自动发送相应的控制消息
+- 支持事件监听（`on` 方法）和触发（`emit` 方法）
+
+### 音频处理流程
+
+**音频采集** (`src/services/AudioManager.ts`)：
+1. 使用 `getUserMedia` 获取麦克风权限
+2. 创建 `AudioContext`（16kHz 采样率）
+3. 加载 `AudioWorklet` 处理器（`audioProcessor.js`）
+4. 创建 `AudioWorkletNode` 处理音频数据
+5. 实时计算音频电平（RMS）
+6. 通过回调函数传递音频数据和电平值
+
+**音频播放**：
+1. 接收服务器返回的音频数据（ArrayBuffer）
+2. 使用 `AudioContext.decodeAudioData` 解码
+3. 加入音频队列
+4. 依次播放队列中的音频
+5. 队列为空时触发回调（切换到 IDLE 状态）
+
+**音频格式**：
+- 采样率：16kHz（采集和播放）
+- 声道：单声道
+- 格式：Float32（前端） → Opus（传输） → PCM（后端处理）
+
+### WebSocket 通信
+
+**前端 WebSocket 服务** (`src/services/WebSocketManager.ts`)：
+- 连接管理：建立连接、自动重连、错误处理
+- 消息发送：
+  - `sendTextMessage`：发送 JSON 文本消息
+  - `sendAudioMessage`：发送 Float32Array 音频数据
+- 消息接收：
+  - 文本消息：解析 JSON，触发 `onTextMessage` 回调
+  - 音频消息：解码为 AudioBuffer，触发 `onAudioMessage` 回调
+
+**消息类型**：
+- `hello`：连接初始化，返回 session_id
+- `listen`：开始/停止监听
+- `stt`：语音识别结果
+- `llm`：大语言模型回复
+- `tts`：语音合成状态
+- `abort`：中断当前操作
+
+### 配置管理
+
+**后端配置** (`backend/app/config.py`)：
+- 单例模式管理配置
+- 从 `config/config.json` 读取配置
+- 自动生成 `CLIENT_ID` 和 `DEVICE_ID`（MAC 地址）
+- 提供 HTTP 接口 `/config` 供前端获取配置
+
+**前端配置** (`src/stores/setting.ts`)：
+- 使用 Pinia 管理全局配置状态
+- 配置优先级：本地存储 > 后端接口 > 默认值
+- 支持配置持久化（localStorage）
+
+### 语音动画管理
+
+**动画管理器** (`src/services/VoiceAnimationManager.ts`)：
+- 用户说话时：更新波形动画（根据音频电平）
+- AI 回复时：头像缩放动画
+- 提供动画状态给 UI 组件使用
+
+### 组件架构
+
+**主要组件**：
+- `App.vue`：应用根组件，管理全局状态和生命周期
+- `ChatContainer.vue`：对话容器，显示消息列表
+- `InputField.vue`：输入框组件，支持文字和语音输入
+- `VoiceCall.vue`：语音通话面板，显示动画和状态
+- `Header`：头部组件，显示连接状态和标题
+- `Setting`：设置面板，配置服务器地址等
+
+**组件通信**：
+- 通过 Props 传递数据
+- 通过 Events 传递事件
+- 通过 Pinia Store 共享状态
+
+### 音频处理细节
+
+**AudioWorklet 处理器** (`public/audioProcessor.js`)：
+- 在独立线程中处理音频
+- 每 60ms 处理一次（960 采样点 @ 16kHz）
+- 计算音频电平（RMS）
+- 通过 `MessagePort` 传递处理结果
+
+**音频电平检测**：
+- 使用 RMS（均方根）算法计算电平
+- 用户说话阈值：0.04
+- 用户打断阈值：0.1
+- 静音超时：1000ms
+
+### 错误处理
+
+**连接错误**：
+- WebSocket 断开 → 3 秒后自动重连
+- 连接失败 → 显示错误提示
+
+**音频错误**：
+- 麦克风权限被拒绝 → 显示提示
+- AudioWorklet 不支持 → 降级处理
+- 音频解码失败 → 跳过该音频片段
+
+**状态错误**：
+- 状态转换异常 → 重置到 IDLE 状态
+- 音频队列溢出 → 清空队列
+
+### 代理后端实现
+
+**WebSocket 代理** (`backend/app/proxy/websocket_proxy.py`)：
+- 维护两个 WebSocket 连接（前端 ↔ 后端）
+- 音频数据转换：
+  - 前端 → 后端：Float32 PCM → Opus 编码
+  - 后端 → 前端：Opus 解码 → Float32 PCM
+- OTA 配置获取：自动调用 OTA 接口更新配置
+
+**音频处理** (`backend/app/utils/audio.py`)：
+- 使用 `opuslib` 进行 Opus 编码/解码
+- PCM 格式转换（Float32 ↔ Int16）
+- 音频缓冲区管理
+
+
+
+
 ## 项目简介
 
 声明：「小智」项目起源于 [虾哥](https://github.com/78/xiaozhi-esp32) 之手。
@@ -282,6 +467,7 @@ ai speak process
 [Huang-junsen](https://github.com/huangjunsen0406)
 [TOM88812](https://github.com/TOM88812)
 [小红书 @涂丫丫](http://xhslink.com/a/ZWjAcoOzvzq9)
+
 
 ## Star 历史
 

@@ -1,0 +1,97 @@
+version: "3.9"
+
+name: xiaozhi-stack
+
+services:
+  # 1) Python 后端（FastAPI/uvicorn）
+  manage_backend:
+    build:
+      context: ./manage_backend
+      dockerfile: Dockerfile
+    image: local/manage_backend:latest
+    container_name: manage_backend
+    env_file:
+      - ./manage_backend/.env        # 可选：把DB_URL等放这里
+    ports:
+      - "30004:8000"                  # 对外暴露后端
+    restart: unless-stopped
+    networks:
+      - app-net
+    # depends_on:                     # 若需要等别的服务就绪再启动，在这里加
+
+  # 2) 前端（Next.js，作为总管理台）
+  manage_frontend:
+    build:
+      context: ./manage_frontend
+      dockerfile: Dockerfile
+    image: local/manage_frontend:latest
+    container_name: manage_frontend
+    environment:
+      PORT: 3000
+      # 让前端在容器内访问后端的 Service 名称（而不是 localhost）
+      NEXT_PUBLIC_API_BASE_URL: "http://manage_backend:8000"
+    ports:
+      - "3003:3000"                  # 管理台对外端口
+    depends_on:
+      - manage_backend
+    restart: unless-stopped
+    networks:
+      - app-net
+
+  # 3) ESP32 Server（从 tour_backend 集成进来）
+  tour_backend:
+    image: ghcr.nju.edu.cn/xinnan-tech/xiaozhi-esp32-server:server_latest
+    container_name: xiaozhi-esp32-server
+    restart: always
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      - TZ=Asia/Shanghai
+    # 避免与 manage_backend(8000) 冲突，把宿主机端口换成 18000/18003
+    ports:
+      - "20010:8000"                 # ws服务端（宿主机 18000）
+      - "16400:8003"                 # http/OTA/视觉（宿主机 18003）
+    volumes:
+      # 推荐挂载整个目录，后续更换/升级模型更方便
+      - ./tour_backend/data:/opt/xiaozhi-esp32-server/data
+      - ./tour_backend/models:/opt/xiaozhi-esp32-server/models:ro
+    networks:
+      - app-net
+
+  # 4) 另一个 Next.js 前端（webui）
+  xiaozhi-webui:
+    build:
+      context: ./xiaozhi-webui
+      dockerfile: Dockerfile
+    image: local/xiaozhi-webui:latest
+    container_name: xiaozhi-webui
+    environment:
+      PORT: 3000
+      # 如果需要访问后端，同样指向容器名
+      # NEXT_PUBLIC_API_BASE_URL: "http://manage_backend:8000"
+    ports:
+      - "3001:3000"                  # 避免与管理台冲突
+    restart: unless-stopped
+    networks:
+      - app-net
+    profiles: ["ui"]                 # 可选：仅在指定 profile 时启动
+
+  # 5) 另一个 Next.js 前端（xiaozhi_web）
+  xiaozhi_web:
+    build:
+      context: ./xiaozhi_web
+      dockerfile: Dockerfile
+    image: local/xiaozhi_web:latest
+    container_name: xiaozhi_web
+    environment:
+      PORT: 3000
+    ports:
+      - "3002:3000"                  # 再错开一个端口
+    restart: unless-stopped
+    networks:
+      - app-net
+    profiles: ["ui"]
+
+networks:
+  app-net:
+    driver: bridge
