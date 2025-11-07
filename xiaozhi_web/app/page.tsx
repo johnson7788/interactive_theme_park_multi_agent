@@ -1177,23 +1177,6 @@ export default function Page() {
     // 添加识别结果到会话记录
     addMessage(text, true);
 
-    /**
-    // 如果识别结果包含有效内容，可以自动触发对话响应
-    if (text.trim().length > 1) {
-      // 自动发送识别结果到LLM
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        const payload = {
-          type: 'listen',
-          mode: 'manual',
-          state: 'detect',
-          text: text.trim()
-        };
-        wsRef.current.send(JSON.stringify(payload));
-        log(`自动发送识别结果到LLM: ${text.trim()}`, 'info');
-      }
-    }
-    **/
-
   };
 
   // 开始语音监听
