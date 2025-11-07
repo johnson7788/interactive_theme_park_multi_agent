@@ -231,3 +231,7 @@ tour_backend/
 ├── plugins_func/              # 功能插件
 └── test/                      # 测试页面
 
+## 启动端口
+OTA接口是		http://127.0.0.1:8003/xiaozhi/ota/
+视觉分析接口是	http://198.18.0.1:8003/mcp/vision/explain
+Websocket地址是	ws://127.0.0.1:8000/xiaozhi/v1/
