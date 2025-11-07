@@ -102,6 +102,8 @@ class ASRProviderBase(ABC):
                         )
                         end_time = time.monotonic()
                         logger.bind(tag=TAG).info(f"ASR耗时: {end_time - start_time:.3f}s")
+                        # 输出ASR结果
+                        logger.bind(tag=TAG).info(f"ASR结果: {result}")
                         return result
                     finally:
                         loop.close()

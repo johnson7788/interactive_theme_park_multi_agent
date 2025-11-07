@@ -200,6 +200,11 @@ async def sendAudio(conn, audios, frame_duration=60):
 
 async def send_tts_message(conn, state, text=None):
     """发送 TTS 状态消息"""
+
+    # 输出日志
+    conn.logger.bind(tag=TAG).info(f"发送TTS消息: {text}")
+
+
     if text is None and state == "sentence_start":
         return
     message = {"type": "tts", "state": state, "session_id": conn.session_id}
@@ -225,6 +230,10 @@ async def send_tts_message(conn, state, text=None):
 
 async def send_stt_message(conn, text):
     """发送 STT 状态消息"""
+
+    # 输出日志
+    conn.logger.bind(tag=TAG).info(f"发送STT消息: {text}")
+
     end_prompt_str = conn.config.get("end_prompt", {}).get("prompt")
     if end_prompt_str and end_prompt_str == text:
         await send_tts_message(conn, "start")

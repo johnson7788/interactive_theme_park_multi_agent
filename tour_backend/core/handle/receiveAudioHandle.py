@@ -11,6 +11,10 @@ TAG = __name__
 
 
 async def handleAudioMessage(conn, audio):
+
+    # 输出日志
+    conn.logger.bind(tag=TAG).info(f"接收语音数据，长度: {len(audio)} 字节")
+
     # 当前片段是否有人说话
     have_voice = conn.vad.is_vad(conn, audio)
     # 如果设备刚刚被唤醒，短暂忽略VAD检测
