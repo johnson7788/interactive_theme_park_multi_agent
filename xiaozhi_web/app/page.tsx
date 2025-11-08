@@ -1,12 +1,19 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Script from 'next/script';
 import { connectViaOTA } from '@/lib/xiaoZhiConnect';
 import { initOpusEncoder, checkOpusLoaded, type OpusEncoderHandle, createOpusDecoder } from '@/lib/opus';
 import { createStreamingContext, StreamingContext } from '@/lib/StreamingContext';
 import BlockingQueue from '@/lib/BlockingQueue';
-import { getUserByName, getNPCById, getCurrentDeviceNPC } from '@/lib/supabase';
+import {
+  getUserByName,
+  getNPCById,
+  getCurrentDeviceNPC,
+  bulkInsertNpcChatLogs,
+  NpcChatLog,
+  getUserById
+} from '@/lib/supabase';
 import { useAdvancedVad, VadState } from '@/hooks/use-advanced-vad';
 import { VADIndicator } from '@/components/voice-chat/VADIndicator';
 
@@ -30,7 +37,7 @@ export default function Page() {
   const [deviceName, setDeviceName] = useState('Web测试设备');
   const [clientId, setClientId] = useState('web_test_client');
   const [token, setToken] = useState('your-token1');
-  const [userId, setUserId] = useState('测试张三');
+  const [userId, setUserId] = useState('3d1b19a5-07a3-4a83-a1e9-33d7c0672c4f');
   const [showUserIdModal, setShowUserIdModal] = useState(true);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   // 从环境变量读取设备ID
@@ -178,7 +185,7 @@ export default function Page() {
     }
   };
 
-  const endCall = () => {
+  const endCall = async () => {
     setIsCalling(false);
     setCallStatus('');
     
@@ -203,6 +210,36 @@ export default function Page() {
     
     // 添加通话结束消息
     addMessage('通话已结束，感谢您的使用！', false);
+    
+    // 批量存储聊天记录
+    try {
+      if (conversation.length > 0 && userId && deviceId) {
+        // 转换对话记录格式
+        const chatLogs = conversation
+          .filter(msg => msg.text && msg.text.trim()) // 过滤空消息
+          .map(msg => ({
+            npc_id: deviceId,
+            user_id: userId,
+            message_content: msg.text || '',
+            sender_type: msg.isUser ? 'user' : 'npc',
+            session_id: conversationState.sessionId || crypto.randomUUID()
+          })) as Omit<NpcChatLog, 'id' | 'created_at'>[];
+        
+        log(`准备批量存储 ${chatLogs.length} 条聊天记录`, 'debug');
+        
+        // 调用批量存储函数
+        const result = await bulkInsertNpcChatLogs(chatLogs);
+        
+        if (result) {
+          log(`成功批量存储 ${result.length} 条聊天记录`, 'success');
+        } else {
+          log('批量存储聊天记录失败', 'error');
+        }
+      }
+    } catch (error) {
+      console.error('批量存储聊天记录时发生错误:', error);
+      log(`批量存储聊天记录时发生错误: ${error instanceof Error ? error.message : '未知错误'}`, 'error');
+    }
   };
   
   // 新增状态管理
@@ -380,7 +417,7 @@ export default function Page() {
         setIsLoading(true);
         
         // 根据用户名查询小朋友信息
-        const userInfo = await getUserByName(userId.trim());
+        const userInfo = await getUserById(userId.trim());
         
         if (userInfo) {
           // 查询成功，记录信息
@@ -1611,7 +1648,7 @@ export default function Page() {
                       阿派朗智能助手
                       {npcInfo?.name && <span className="ml-2">{npcInfo.name}</span>}
                     </h1>
-                    <p className="text-sm opacity-80">与 {userId} 对话中</p>
+                    <p className="text-sm opacity-80">与 {childInfo?.name || '用户'} 对话中</p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-4">

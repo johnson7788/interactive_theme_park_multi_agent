@@ -34,6 +34,17 @@ export type Dialogue = {
   created_at: string;
 };
 
+// NPC聊天日志类型
+export type NpcChatLog = {
+  id: string;
+  npc_id: string;
+  user_id: string;
+  message_content: string;
+  sender_type: 'npc' | 'user';
+  session_id: string;
+  created_at: string;
+};
+
 // 根据NPC-ID获取NPC信息
 export const getNPCById = async (npcId: string): Promise<NPC | null> => {
   try {
@@ -174,5 +185,23 @@ export const getDialogueHistory = async (userId: string, npcId: string): Promise
   } catch (error) {
     console.error('获取聊天历史失败:', error);
     return [];
+  }
+};
+
+// 批量插入NPC聊天日志
+export const bulkInsertNpcChatLogs = async (
+  logs: Omit<NpcChatLog, 'id' | 'created_at'>[]
+): Promise<NpcChatLog[] | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('npc_chat_logs')
+      .insert(logs)
+      .select();
+
+    if (error) throw error;
+    return data as NpcChatLog[];
+  } catch (error) {
+    console.error('批量插入NPC聊天日志失败:', error);
+    return null;
   }
 };
