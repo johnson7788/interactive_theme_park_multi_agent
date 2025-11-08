@@ -11,7 +11,7 @@ services:
     image: local/manage_backend:latest
     container_name: manage_backend
     env_file:
-      - ./manage_backend/.env        # 可选：把DB_URL等放这里
+      - ./manage_backend/.env        # 读取环境变量
     ports:
       - "30004:8000"                  # 对外暴露后端
     restart: unless-stopped
@@ -26,6 +26,8 @@ services:
       dockerfile: Dockerfile
     image: local/manage_frontend:latest
     container_name: manage_frontend
+    env_file:
+      - ./manage_frontend/.env        # 读取环境变量
     environment:
       PORT: 3000
       # 让前端在容器内访问后端的 Service 名称（而不是 localhost）
@@ -45,6 +47,8 @@ services:
     restart: always
     security_opt:
       - seccomp:unconfined
+    env_file:
+      - ./tour_backend/.env        # 读取环境变量
     environment:
       - TZ=Asia/Shanghai
     # 避免与 manage_backend(8000) 冲突，把宿主机端口换成 18000/18003
@@ -65,6 +69,8 @@ services:
       dockerfile: Dockerfile
     image: local/xiaozhi-webui:latest
     container_name: xiaozhi-webui
+    env_file:
+      - ./xiaozhi-webui/.env        # 读取环境变量
     environment:
       PORT: 3000
       # 如果需要访问后端，同样指向容器名
@@ -83,6 +89,8 @@ services:
       dockerfile: Dockerfile
     image: local/xiaozhi_web:latest
     container_name: xiaozhi_web
+    env_file:
+      - ./xiaozhi_web/.env        # 读取环境变量
     environment:
       PORT: 3000
     ports:
