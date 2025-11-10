@@ -3,6 +3,7 @@ set -e
 
 #######################################
 #           参数与变量定义
+# 部署域名： https://open.minitool.fun/
 #######################################
 WORK_DIR="/media/wac/backup/john/johnson/interactive_theme_park_multi_agent"
 ENV_FILE=".env_prod"
@@ -27,10 +28,10 @@ log() {
 update_code() {
   log "Step 0: 拉取最新代码"
   cd "$WORK_DIR"
-  git fetch
-  git checkout "$BRANCH_NAME" || { echo "Error: 切换分支 $BRANCH_NAME 失败"; exit 1; }
-  git reset --hard
-  git pull --rebase || { echo "Error: Git pull 失败，可能存在未提交的更改"; exit 1; }
+#  git fetch
+#  git checkout "$BRANCH_NAME" || { echo "Error: 切换分支 $BRANCH_NAME 失败"; exit 1; }
+#  git reset --hard
+#  git pull --rebase || { echo "Error: Git pull 失败，可能存在未提交的更改"; exit 1; }
   echo "当前所在分支: $(git branch)"
 }
 
@@ -44,7 +45,6 @@ replace_config_files() {
   cp "$WORK_DIR/manage_frontend/.env_prod" "$WORK_DIR/manage_frontend/.env"
   cp "$WORK_DIR/manage_frontend/Dockerfile.prod" "$WORK_DIR/manage_frontend/Dockerfile"
   cp "$WORK_DIR/tour_backend/.env_prod" "$WORK_DIR/tour_backend/.env"
-  cp "$WORK_DIR/tour_backend/Dockerfile.prod" "$WORK_DIR/tour_backend/Dockerfile"
   cp "$WORK_DIR/xiaozhi-webui/.env_prod" "$WORK_DIR/xiaozhi-webui/.env"
   cp "$WORK_DIR/xiaozhi-webui/Dockerfile.prod" "$WORK_DIR/xiaozhi-webui/Dockerfile"
   cp "$WORK_DIR/xiaozhi_web/.env_prod" "$WORK_DIR/xiaozhi_web/.env"
