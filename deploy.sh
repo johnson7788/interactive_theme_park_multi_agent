@@ -7,6 +7,11 @@ set -e
 WORK_DIR="/media/wac/backup/john/johnson/interactive_theme_park_multi_agent"
 ENV_FILE=".env_prod"
 BRANCH_NAME="master"
+export http_proxy=http://127.0.0.1:7890
+export https_proxy=http://127.0.0.1:7890
+export all_proxy=http://127.0.0.1:7890
+export HTTP_PROXY=http://127.0.0.1:7890
+export HTTPs_PROXY=http://127.0.0.1:7890
 
 # ANSI color
 GREEN='\033[0;32m'
