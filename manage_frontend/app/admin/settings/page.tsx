@@ -69,6 +69,7 @@ export default function SettingsPage() {
                   <SelectContent>
                     <SelectItem value="gpt-4">GPT-4</SelectItem>
                     <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
+                    <SelectItem value="glm-4.6">GLM-4.6</SelectItem>
                     <SelectItem value="claude-3">Claude 3</SelectItem>
                   </SelectContent>
                 </Select>
