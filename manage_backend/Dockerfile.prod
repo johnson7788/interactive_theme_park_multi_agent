@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
