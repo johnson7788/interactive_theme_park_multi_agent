@@ -670,6 +670,28 @@ export default function Page() {
         const hello = { type: 'hello', device_id: cfg.deviceId, device_name: cfg.deviceName, device_mac: cfg.deviceMac, token: cfg.token, features: { mcp: true } };
         ws.send(JSON.stringify(hello));
 
+        // 发送完整历史作为上下文（以 Supabase 合并历史为准）
+        try {
+          if (userId) {
+            const merged = await getMergedDialogueHistory(userId);
+            if (merged && merged.length > 0) {
+              const historyPayload = {
+                type: 'history',
+                messages: merged.map(m => ({
+                  role: m.is_npc ? 'assistant' : 'user',
+                  content: m.message,
+                  created_at: m.created_at,
+                  npc_id: m.npc_id
+                }))
+              };
+              ws.send(JSON.stringify(historyPayload));
+              log(`已向后端注入历史 ${merged.length} 条`, 'info');
+            }
+          }
+        } catch (e:any) {
+          log(`发送历史到后端失败: ${e?.message || e}`, 'warning');
+        }
+
         // 预热音频系统
         ensureAudioContext();
         analyserRef.current = audioCtxRef.current!.createAnalyser();
