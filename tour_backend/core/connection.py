@@ -631,7 +631,7 @@ class ConnectionHandler:
             return
         """初始化记忆模块"""
         self.memory.init_memory(
-            role_id=self.device_id,
+            role_id=self.headers.get("client-id", self.device_id),
             llm=self.llm,
             summary_memory=self.config.get("summaryMemory", None),
             save_to_file=not self.read_config_from_api,

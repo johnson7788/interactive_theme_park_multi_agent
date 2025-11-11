@@ -12,7 +12,12 @@ import {
   getCurrentDeviceNPC,
   bulkInsertNpcChatLogs,
   NpcChatLog,
-  getUserById
+  getUserById,
+  getDialogueHistory,
+  getAllNPCs,
+  getMergedDialogueHistory,
+  type NPC,
+  type Dialogue
 } from '@/lib/supabase';
 import { useAdvancedVad, VadState } from '@/hooks/use-advanced-vad';
 import { VADIndicator } from '@/components/voice-chat/VADIndicator';
@@ -44,6 +49,9 @@ export default function Page() {
   const [deviceId, setDeviceId] = useState<string>(process.env.NEXT_PUBLIC_NPC_DEVICE_ID || '');
   // 新增NPC信息状态
   const [npcInfo, setNpcInfo] = useState<any>(null);
+  // NPC列表状态
+  const [npcList, setNpcList] = useState<NPC[]>([]);
+  const [loadingNPCs, setLoadingNPCs] = useState(false);
   // 电话相关状态
   const [isCalling, setIsCalling] = useState(false);
   const [callStatus, setCallStatus] = useState('');
@@ -232,6 +240,23 @@ export default function Page() {
         
         if (result) {
           log(`成功批量存储 ${result.length} 条聊天记录`, 'success');
+          
+          // 保存成功后，更新本地存储，确保切换NPC时能立即看到
+          try {
+            const dialogueHistory: Dialogue[] = result.map(log => ({
+              id: log.id,
+              user_id: log.user_id,
+              npc_id: log.npc_id,
+              message: log.message_content,
+              is_npc: log.sender_type === 'npc',
+              created_at: log.created_at
+            }));
+            const key = `chat_history_${userId}_${deviceId}`;
+            localStorage.setItem(key, JSON.stringify(dialogueHistory));
+            log('已更新本地对话历史缓存', 'debug');
+          } catch (error) {
+            console.error('更新本地缓存失败:', error);
+          }
         } else {
           log('批量存储聊天记录失败', 'error');
         }
@@ -352,7 +377,24 @@ export default function Page() {
     }
   }, [deviceId]);
 
-  // 根据设备ID获取NPC信息
+  // 加载所有NPC列表
+  useEffect(() => {
+    const loadNPCList = async () => {
+      setLoadingNPCs(true);
+      try {
+        const npcs = await getAllNPCs();
+        setNpcList(npcs);
+        log(`已加载 ${npcs.length} 个NPC角色`, 'info');
+      } catch (error) {
+        console.error('加载NPC列表失败:', error);
+      } finally {
+        setLoadingNPCs(false);
+      }
+    };
+    loadNPCList();
+  }, []);
+
+  // 根据设备ID获取NPC信息，并加载对话历史
   useEffect(() => {
     const fetchNpcInfo = async () => {
       if (deviceId) {
@@ -360,9 +402,34 @@ export default function Page() {
           const npc = await getNPCById(deviceId);
           if (npc) {
             setNpcInfo(npc);
+            // 如果已登录用户，加载该用户的跨NPC合并历史
+            if (userId) {
+              try {
+                const history = await getMergedDialogueHistory(userId);
+                const formattedMessages = history.map(msg => ({
+                  text: msg.message,
+                  isUser: !msg.is_npc,
+                  timestamp: new Date(msg.created_at)
+                }));
+                setConversation(formattedMessages);
+                if (history.length > 0) {
+                  log(`已加载合并历史 ${history.length} 条`, 'info');
+                } else {
+                  log('该用户暂无历史对话记录，开始新的对话', 'info');
+                }
+              } catch (error) {
+                console.error('加载对话历史失败:', error);
+                // 出错时也清空对话，避免显示错误的历史
+                setConversation([]);
+              }
+            } else {
+              // 未登录时清空对话
+              setConversation([]);
+            }
           }
         } catch (error) {
           console.error('获取NPC信息失败:', error);
+          setConversation([]);
         }
       } else {
         // 如果没有提供特定的deviceId，使用当前设备默认的NPC
@@ -370,15 +437,38 @@ export default function Page() {
           const npc = await getCurrentDeviceNPC();
           if (npc) {
             setNpcInfo(npc);
+            // 如果已登录用户，加载该用户的跨NPC合并历史
+            if (userId && npc.id) {
+              try {
+                const history = await getMergedDialogueHistory(userId);
+                const formattedMessages = history.map(msg => ({
+                  text: msg.message,
+                  isUser: !msg.is_npc,
+                  timestamp: new Date(msg.created_at)
+                }));
+                setConversation(formattedMessages);
+                if (history.length > 0) {
+                  log(`已加载合并历史 ${history.length} 条`, 'info');
+                } else {
+                  log('该用户暂无历史对话记录，开始新的对话', 'info');
+                }
+              } catch (error) {
+                console.error('加载对话历史失败:', error);
+                setConversation([]);
+              }
+            } else {
+              setConversation([]);
+            }
           }
         } catch (error) {
           console.error('获取默认NPC信息失败:', error);
+          setConversation([]);
         }
       }
     };
 
     fetchNpcInfo();
-  }, [deviceId]);
+  }, [deviceId, userId]);
 
   // 自动连接OTA（当页面加载且有用户信息时）
   useEffect(() => {
@@ -550,8 +640,10 @@ export default function Page() {
     setWsOk(false);
 
     try {
+      // 使用 deviceId（NPC ID）作为设备标识，如果没有设置则使用 deviceMac
+      const actualDeviceId = deviceId || deviceMac;
       const cfg = {
-        deviceId: deviceMac,
+        deviceId: actualDeviceId,
         deviceName,
         deviceMac,
         clientId,
@@ -1593,14 +1685,43 @@ export default function Page() {
                           </div>
                         </div>
                         <div className="mb-2">
-                          <div className="text-gray-700 font-medium mb-1">设备ID</div>
+                          <div className="text-gray-700 font-medium mb-1">
+                            NPC ID（角色ID）
+                            <span className="text-red-500 ml-1">*</span>
+                          </div>
+                          
+                          {/* NPC选择器 */}
+                          {npcList.length > 0 && (
+                            <div className="mb-2">
+                              <select
+                                value={deviceId}
+                                onChange={(e) => setDeviceId(e.target.value)}
+                                className="w-full px-2 py-1 rounded border border-purple-300 text-xs bg-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                              >
+                                <option value="">-- 请选择NPC --</option>
+                                {npcList.map((npc) => (
+                                  <option key={npc.id} value={npc.id}>
+                                    {npc.name} ({npc.id})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          
+                          {/* 手动输入 */}
                           <input
                             type="text"
                             value={deviceId}
                             onChange={(e) => setDeviceId(e.target.value)}
-                            className="w-full px-2 py-1 rounded border border-gray-300 text-xs bg-white"
-                            placeholder="输入设备ID..."
+                            className="w-full px-2 py-1 rounded border border-purple-300 text-xs bg-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                            placeholder="或手动输入NPC的ID（UUID格式）..."
                           />
+                          <div className="text-gray-500 text-xs mt-1">
+                            💡 切换不同的NPC ID可以对话不同的角色，每个角色的对话历史是独立的
+                          </div>
+                          {loadingNPCs && (
+                            <div className="text-gray-400 text-xs mt-1">正在加载NPC列表...</div>
+                          )}
                         </div>
                         <div className="mb-2">
                           <div className="text-gray-700 font-medium mb-1">连接状态</div>
@@ -1670,7 +1791,99 @@ export default function Page() {
               {/* 调试信息面板 */}
               {showDebugInfo && (
                 <div className="bg-gray-50 border-b border-gray-200 p-4 max-h-96 overflow-y-auto">
-                  <div className="text-sm font-medium text-gray-700 mb-2">调试信息</div>
+                  <div className="text-sm font-medium text-gray-700 mb-3">调试信息</div>
+                  
+                  {/* NPC ID 设置 - 突出显示 */}
+                  <div className="mb-4 p-3 bg-purple-50 rounded-lg border-2 border-purple-200">
+                    <div className="text-sm font-semibold text-purple-800 mb-2">
+                      🎭 切换 NPC 角色
+                    </div>
+                    <div className="text-xs text-gray-600 mb-2">
+                      选择或输入NPC ID可以切换到不同的角色进行对话
+                    </div>
+                    
+                    {/* NPC选择器 */}
+                    {npcList.length > 0 && (
+                      <div className="mb-2">
+                        <label className="text-xs text-gray-600 mb-1 block">快速选择NPC：</label>
+                        <select
+                          value={deviceId}
+                          onChange={async (e) => {
+                            const newDeviceId = e.target.value;
+                            // 设置新的NPC ID
+                            setDeviceId(newDeviceId);
+                            // 加载用户跨NPC的合并历史（以Supabase为准）
+                            if (userId) {
+                              try {
+                                const history = await getMergedDialogueHistory(userId);
+                                const formatted = history.map(msg => ({
+                                  text: msg.message,
+                                  isUser: !msg.is_npc,
+                                  timestamp: new Date(msg.created_at)
+                                }));
+                                setConversation(formatted);
+                                log(`合并历史 ${formatted.length} 条`, 'info');
+                              } catch (err) {
+                                console.error('加载合并历史失败:', err);
+                              }
+                            }
+                            // 自动切换并重连
+                            if (newDeviceId && wsRef.current) {
+                              disconnect();
+                              setTimeout(() => connect(), 500);
+                            }
+                          }}
+                          className="w-full px-3 py-2 rounded border-2 border-purple-300 text-sm bg-white focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
+                        >
+                          <option value="">-- 请选择NPC --</option>
+                          {npcList.map((npc) => (
+                            <option key={npc.id} value={npc.id}>
+                              {npc.name} ({npc.id})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    
+                    {/* 手动输入NPC ID */}
+                    <div className="mb-2">
+                      <label className="text-xs text-gray-600 mb-1 block">或手动输入NPC ID：</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={deviceId}
+                          onChange={(e) => setDeviceId(e.target.value)}
+                          className="flex-1 px-3 py-2 rounded border-2 border-purple-300 text-sm bg-white focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
+                          placeholder="输入NPC的ID（UUID格式）..."
+                        />
+                        <button
+                          onClick={() => {
+                            if (deviceId && wsRef.current) {
+                              disconnect();
+                              setTimeout(() => connect(), 500);
+                            }
+                          }}
+                          disabled={!deviceId}
+                          className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm font-medium"
+                        >
+                          切换并重连
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {npcInfo && (
+                      <div className="mt-2 text-xs text-purple-700">
+                        当前角色：<span className="font-semibold">{npcInfo.name}</span>
+                        {npcInfo.description && (
+                          <div className="text-gray-600 mt-1">{npcInfo.description}</div>
+                        )}
+                      </div>
+                    )}
+                    {loadingNPCs && (
+                      <div className="mt-2 text-xs text-gray-500">正在加载NPC列表...</div>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                     <div className="bg-white p-2 rounded border border-gray-200">
                       <div className="text-gray-500">设备MAC</div>

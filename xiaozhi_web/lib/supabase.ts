@@ -72,6 +72,22 @@ export const getCurrentDeviceNPC = async (): Promise<NPC | null> => {
   return getNPCById(npcId);
 };
 
+// 获取所有NPC列表
+export const getAllNPCs = async (): Promise<NPC[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('npc_characters')
+      .select('*')
+      .order('name', { ascending: true });
+
+    if (error) throw error;
+    return (data || []) as NPC[];
+  } catch (error) {
+    console.error('获取NPC列表失败:', error);
+    return [];
+  }
+};
+
 // 根据USER-ID获取用户信息
 export const getUserById = async (userId: string): Promise<User | null> => {
   try {
@@ -158,7 +174,26 @@ export const saveCompleteDialogue = async (dialogue: Omit<Dialogue, 'id' | 'crea
   return savedDialogue;
 };
 
+// 从 npc_chat_logs 表获取聊天历史
+export const getNpcChatHistory = async (userId: string, npcId: string): Promise<NpcChatLog[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('npc_chat_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('npc_id', npcId)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    return (data || []) as NpcChatLog[];
+  } catch (error) {
+    console.error('从npc_chat_logs获取聊天历史失败:', error);
+    return [];
+  }
+};
+
 // 获取聊天历史记录（优先从本地获取，没有则从Supabase获取）
+// 优先从 npc_chat_logs 表读取（因为保存时用的是这个表），如果没有则从 dialogues 表读取
 export const getDialogueHistory = async (userId: string, npcId: string): Promise<Dialogue[]> => {
   // 先从本地获取
   const localHistory = getDialogueHistoryFromLocalStorage(userId, npcId);
@@ -166,7 +201,31 @@ export const getDialogueHistory = async (userId: string, npcId: string): Promise
     return localHistory;
   }
   
-  // 如果本地没有，从Supabase获取
+  // 如果本地没有，先从 npc_chat_logs 表获取（因为保存时用的是这个表）
+  try {
+    const chatLogs = await getNpcChatHistory(userId, npcId);
+    if (chatLogs.length > 0) {
+      // 转换为 Dialogue 格式
+      const dialogueHistory: Dialogue[] = chatLogs.map(log => ({
+        id: log.id,
+        user_id: log.user_id,
+        npc_id: log.npc_id,
+        message: log.message_content,
+        is_npc: log.sender_type === 'npc',
+        created_at: log.created_at
+      }));
+      
+      // 保存到本地
+      const key = `chat_history_${userId}_${npcId}`;
+      localStorage.setItem(key, JSON.stringify(dialogueHistory));
+      
+      return dialogueHistory;
+    }
+  } catch (error) {
+    console.error('从npc_chat_logs获取聊天历史失败:', error);
+  }
+  
+  // 如果 npc_chat_logs 表没有数据，尝试从 dialogues 表获取（兼容旧数据）
   try {
     const { data, error } = await supabase
       .from('dialogues')
@@ -183,7 +242,35 @@ export const getDialogueHistory = async (userId: string, npcId: string): Promise
     
     return dialogueHistory;
   } catch (error) {
-    console.error('获取聊天历史失败:', error);
+    console.error('从dialogues获取聊天历史失败:', error);
+    return [];
+  }
+};
+
+// 获取同一用户跨所有NPC的合并聊天历史（以Supabase为准，按时间升序）
+export const getMergedDialogueHistory = async (userId: string): Promise<Dialogue[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('npc_chat_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    // 映射为 Dialogue 统一结构，保留 npc_id 以便前端区分来源
+    const merged: Dialogue[] = (data || []).map((log: any) => ({
+      id: log.id,
+      user_id: log.user_id,
+      npc_id: log.npc_id,
+      message: log.message_content,
+      is_npc: log.sender_type === 'npc',
+      created_at: log.created_at
+    }));
+
+    return merged;
+  } catch (error) {
+    console.error('获取跨NPC合并历史失败:', error);
     return [];
   }
 };
