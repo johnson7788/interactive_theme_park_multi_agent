@@ -11,7 +11,7 @@ services:
     env_file:
       - ./manage_backend/.env        # 读取环境变量
     ports:
-      - "30004:8000"                  # 对外暴露后端
+      - "33004:8000"                  # 对外暴露后端
     restart: unless-stopped
     networks:
       - app-net
@@ -31,7 +31,7 @@ services:
       # 让前端在容器内访问后端的 Service 名称（而不是 localhost）
       NEXT_PUBLIC_API_BASE_URL: "http://manage_backend:8000"
     ports:
-      - "3003:3000"                  # 管理台对外端口
+      - "33003:3000"                  # 管理台对外端口
     depends_on:
       - manage_backend
     restart: unless-stopped
@@ -51,8 +51,8 @@ services:
       - TZ=Asia/Shanghai
     # 避免与 manage_backend(8000) 冲突，把宿主机端口换成 18000/18003
     ports:
-      - "20010:8000"                 # ws服务端（宿主机 18000）
-      - "16400:8003"                 # http/OTA/视觉（宿主机 18003）
+      - "23010:8000"                 # ws服务端（宿主机 18000）
+      - "16403:8003"                 # http/OTA/视觉（宿主机 18003）
     volumes:
       # 推荐挂载整个目录，后续更换/升级模型更方便
       - ./tour_backend/data:/opt/xiaozhi-esp32-server/data
@@ -74,7 +74,7 @@ services:
       # 如果需要访问后端，同样指向容器名
       # NEXT_PUBLIC_API_BASE_URL: "http://manage_backend:8000"
     ports:
-      - "3001:3000"                  # 避免与管理台冲突
+      - "33001:3000"                  # 避免与管理台冲突
     restart: unless-stopped
     networks:
       - app-net
@@ -91,7 +91,7 @@ services:
     environment:
       PORT: 3000
     ports:
-      - "3002:3000"                  # 再错开一个端口
+      - "33002:3000"                  # 再错开一个端口
     restart: unless-stopped
     networks:
       - app-net
