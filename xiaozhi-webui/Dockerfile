@@ -1,5 +1,5 @@
 # Stage 1: Build the React/Vite app
-FROM node:22-alpine AS build
+FROM node:20-alpine AS build
 WORKDIR /app
 
 # 更快的缓存层：先只拷贝依赖清单
