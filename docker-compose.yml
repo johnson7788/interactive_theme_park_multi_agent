@@ -2,19 +2,19 @@ name: xiaozhi-stack
 
 services:
   # 1) Python 后端（FastAPI/uvicorn）
-  manage_backend:
-    build:
-      context: ./manage_backend
-      dockerfile: Dockerfile
-    image: local/manage_backend:latest
-    container_name: manage_backend
-    env_file:
-      - ./manage_backend/.env        # 读取环境变量
-    ports:
-      - "33004:8000"                  # 对外暴露后端
-    restart: unless-stopped
-    networks:
-      - app-net
+#  manage_backend:
+#    build:
+#      context: ./manage_backend
+#      dockerfile: Dockerfile
+#    image: local/manage_backend:latest
+#    container_name: manage_backend
+#    env_file:
+#      - ./manage_backend/.env        # 读取环境变量
+#    ports:
+#      - "33004:8000"                  # 对外暴露后端
+#    restart: unless-stopped
+#    networks:
+#      - app-net
     # depends_on:                     # 若需要等别的服务就绪再启动，在这里加
 
   # 2) 前端（Next.js，作为总管理台）
@@ -32,8 +32,6 @@ services:
       NEXT_PUBLIC_API_BASE_URL: "http://manage_backend:8000"
     ports:
       - "33003:3000"                  # 管理台对外端口
-    depends_on:
-      - manage_backend
     restart: unless-stopped
     networks:
       - app-net
