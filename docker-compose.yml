@@ -70,9 +70,9 @@ services:
     environment:
       PORT: 3000
       # 如果需要访问后端，同样指向容器名
-      # NEXT_PUBLIC_API_BASE_URL: "http://manage_backend:8000"
+      # NEXT_PUBLIC_API_BASE_URL: "http://manage_backend:80"
     ports:
-      - "33001:3000"                  # 避免与管理台冲突
+      - "33001:80"                  # 避免与管理台冲突
     restart: unless-stopped
     networks:
       - app-net
