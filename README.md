@@ -337,4 +337,7 @@ vision_handler.py
 ```
 
 ## 如何部署
+```
+注意各种.env文件,详细查看deploy.sh的内容，原理是deploy.sh 调用[docker-compose.yml](docker-compose.yml)部署
 bash deploy.sh
+```
