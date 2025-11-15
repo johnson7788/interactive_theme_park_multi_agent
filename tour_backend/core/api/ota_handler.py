@@ -105,7 +105,7 @@ class OTAHandler(BaseHandler):
             }
 
             mqtt_gateway_endpoint = server_config.get("mqtt_gateway")
-
+            print(f"mqtt_gateway_endpoint: {mqtt_gateway_endpoint}")
             if mqtt_gateway_endpoint:  # 如果配置了非空字符串
                 # 尝试从请求数据中获取设备型号
                 device_model = "default"
