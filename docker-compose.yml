@@ -38,7 +38,9 @@ services:
 
   # 3) ESP32 Server（从 tour_backend 集成进来）
   tour_backend:
-    image: ghcr.nju.edu.cn/xinnan-tech/xiaozhi-esp32-server:server_latest
+    build:
+      context: ./tour_backend
+      dockerfile: Dockerfile
     container_name: tour_backend
     restart: always
     security_opt:
