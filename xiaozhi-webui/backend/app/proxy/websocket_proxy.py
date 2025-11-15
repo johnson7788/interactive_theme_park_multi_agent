@@ -110,11 +110,11 @@ class WebSocketProxy:
                 )
 
         except requests.Timeout:
-            logger.error("OTA 请求超时")
+            logger.error(f"OTA 请求超时： {self.ota_version_url}")
             raise ValueError("OTA 请求超时，请稍后重试")
 
         except requests.RequestException as e:
-            logger.error(f"OTA 请求失败: {e}")
+            logger.error(f"OTA 请求失败: {e}: {self.ota_version_url}")
             raise ValueError("无法连接到 OTA 服务器，请检查网络连接")
 
     def create_wav_header(self, total_samples):
