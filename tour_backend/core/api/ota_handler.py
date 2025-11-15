@@ -55,10 +55,12 @@ class OTAHandler(BaseHandler):
         """
         server_config = self.config["server"]
         websocket_config = server_config.get("websocket", "")
-
+        print(f"_get_websocket_url: {self.config}")
         if websocket_config and websocket_config.strip() and "你" not in websocket_config:
+            print(f"_get_websocket_url->websocket_config: {websocket_config}")
             return websocket_config
         else:
+            print(f"_get_websocket_url->默认： ws://{local_ip}:{port}/xiaozhi/v1/")
             return f"ws://{local_ip}:{port}/xiaozhi/v1/"
 
     async def handle_post(self, request):
