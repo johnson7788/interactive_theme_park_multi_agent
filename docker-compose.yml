@@ -83,6 +83,8 @@ services:
       dockerfile: Dockerfile
     image: local/xiaozhi-webui-proxy:latest
     container_name: xiaozhi-webui-proxy
+    depends_on:
+      - tour_backend          # ⭐ 让代理在 tour_backend 启动后启动
     ports:
       - "23005:5000"                  # ws端口
       - "23004:8081"                  #http端口
