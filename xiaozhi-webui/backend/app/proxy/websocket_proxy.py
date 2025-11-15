@@ -4,6 +4,7 @@ import websockets
 import json
 import numpy as np
 import requests
+import traceback
 from ..utils.device import get_mac_address, get_local_ip
 from ..utils.logger import get_logger
 from ..utils.audio import pcm_to_opus, decoder, AudioProcessor
@@ -110,10 +111,12 @@ class WebSocketProxy:
                 )
 
         except requests.Timeout:
+            traceback.print_exc()
             logger.error(f"OTA 请求超时： {self.ota_version_url}")
             raise ValueError("OTA 请求超时，请稍后重试")
 
         except requests.RequestException as e:
+            traceback.print_exc()
             logger.error(f"OTA 请求失败: {e}: {self.ota_version_url}")
             raise ValueError("无法连接到 OTA 服务器，请检查网络连接")
 
