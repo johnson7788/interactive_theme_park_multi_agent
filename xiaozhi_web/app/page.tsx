@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Script from 'next/script';
 import { connectViaOTA } from '@/lib/xiaoZhiConnect';
 import { initOpusEncoder, checkOpusLoaded, type OpusEncoderHandle, createOpusDecoder } from '@/lib/opus';
@@ -55,6 +55,8 @@ export default function Page() {
   // 电话相关状态
   const [isCalling, setIsCalling] = useState(false);
   const [callStatus, setCallStatus] = useState('');
+  // 保存对话记录状态标志
+  const [isSavingConversation, setIsSavingConversation] = useState(false);
   
   // 初始化VAD检测
   const { vadState, isSpeechDetected, startVad, stopVad, error: vadError, currentVadStateRef } = useAdvancedVad({
@@ -220,50 +222,131 @@ export default function Page() {
     addMessage('通话已结束，感谢您的使用！', false);
     
     // 批量存储聊天记录
+    setIsSavingConversation(true);
     try {
-      if (conversation.length > 0 && userId && deviceId) {
-        // 转换对话记录格式
-        const chatLogs = conversation
-          .filter(msg => msg.text && msg.text.trim()) // 过滤空消息
-          .map(msg => ({
-            npc_id: deviceId,
-            user_id: userId,
-            message_content: msg.text || '',
-            sender_type: msg.isUser ? 'user' : 'npc',
-            session_id: conversationState.sessionId || crypto.randomUUID()
-          })) as Omit<NpcChatLog, 'id' | 'created_at'>[];
-        
-        log(`准备批量存储 ${chatLogs.length} 条聊天记录`, 'debug');
-        
-        // 调用批量存储函数
-        const result = await bulkInsertNpcChatLogs(chatLogs);
-        
-        if (result) {
-          log(`成功批量存储 ${result.length} 条聊天记录`, 'success');
-          
-          // 保存成功后，更新本地存储，确保切换NPC时能立即看到
-          try {
-            const dialogueHistory: Dialogue[] = result.map(log => ({
-              id: log.id,
-              user_id: log.user_id,
-              npc_id: log.npc_id,
-              message: log.message_content,
-              is_npc: log.sender_type === 'npc',
-              created_at: log.created_at
-            }));
-            const key = `chat_history_${userId}_${deviceId}`;
-            localStorage.setItem(key, JSON.stringify(dialogueHistory));
-            log('已更新本地对话历史缓存', 'debug');
-          } catch (error) {
-            console.error('更新本地缓存失败:', error);
+      if (!userId || !deviceId) {
+        log(`无法保存：userId=${userId}, deviceId=${deviceId}`, 'warning');
+        setIsSavingConversation(false);
+        return;
+      }
+      
+      if (conversation.length === 0) {
+        log('对话记录为空，无需保存', 'info');
+        setIsSavingConversation(false);
+        return;
+      }
+      
+      log(`开始保存对话记录，当前对话数量: ${conversation.length}`, 'info');
+      
+      // 获取已保存的历史记录，用于去重
+      // 为了确保去重准确，加载更多历史记录（最多100条）
+      let existingHistory: Dialogue[] = [];
+      try {
+        existingHistory = await getMergedDialogueHistory(userId, 100);
+        log(`已获取历史记录 ${existingHistory.length} 条（用于去重）`, 'debug');
+      } catch (error) {
+        console.error('获取历史记录失败:', error);
+        log(`获取历史记录失败: ${error instanceof Error ? error.message : '未知错误'}`, 'warning');
+        // 即使获取历史失败，也继续保存新消息
+      }
+      
+      // 创建已存在消息的集合（用于快速查找）
+      // 使用更宽松的匹配：只比较消息内容和发送者类型，忽略空格差异
+      const existingMessages = new Set(
+        existingHistory
+          .filter(msg => msg.npc_id === deviceId)
+          .map(msg => {
+            const normalizedMsg = (msg.message || '').trim().replace(/\s+/g, ' ');
+            return `${normalizedMsg}_${msg.is_npc ? 'npc' : 'user'}`;
+          })
+      );
+      
+      log(`已存在消息集合大小: ${existingMessages.size}`, 'debug');
+      
+      // 转换对话记录格式，并过滤掉已存在的消息
+      const chatLogs = conversation
+        .filter(msg => {
+          // 过滤空消息
+          if (!msg.text || !msg.text.trim()) {
+            return false;
           }
-        } else {
-          log('批量存储聊天记录失败', 'error');
+          // 过滤已存在的消息（通过消息内容和发送者类型判断）
+          const normalizedText = msg.text.trim().replace(/\s+/g, ' ');
+          const messageKey = `${normalizedText}_${msg.isUser ? 'user' : 'npc'}`;
+          const isNew = !existingMessages.has(messageKey);
+          if (!isNew) {
+            log(`跳过已存在的消息: ${normalizedText.substring(0, 50)}...`, 'debug');
+          }
+          return isNew;
+        })
+        .map(msg => ({
+          npc_id: deviceId,
+          user_id: userId,
+          message_content: msg.text || '',
+          sender_type: msg.isUser ? 'user' : 'npc',
+          session_id: conversationState.sessionId || crypto.randomUUID()
+        })) as Omit<NpcChatLog, 'id' | 'created_at'>[];
+      
+      if (chatLogs.length === 0) {
+        log('没有新消息需要保存（所有消息已存在）', 'info');
+        // 即使没有新消息，也重新加载历史记录以确保页面显示正确（最近20轮对话）
+        try {
+          const updatedHistory = await getMergedDialogueHistory(userId, 40);
+          const formattedMessages = updatedHistory.map(msg => ({
+            text: msg.message,
+            isUser: !msg.is_npc,
+            timestamp: new Date(msg.created_at)
+          }));
+          setConversation(formattedMessages);
+          log(`已刷新页面显示，共 ${formattedMessages.length} 条记录（最近20轮对话）`, 'info');
+        } catch (error) {
+          console.error('刷新历史记录失败:', error);
         }
+        return;
+      }
+      
+      log(`准备批量存储 ${chatLogs.length} 条新聊天记录（已过滤 ${conversation.length - chatLogs.length} 条重复消息）`, 'info');
+      log(`新消息示例: ${chatLogs.slice(0, 2).map(log => log.message_content.substring(0, 30)).join(', ')}...`, 'debug');
+      
+      // 调用批量存储函数
+      const result = await bulkInsertNpcChatLogs(chatLogs);
+      
+      if (result && result.length > 0) {
+        log(`✅ 成功批量存储 ${result.length} 条聊天记录`, 'success');
+        
+        // 保存成功后，重新加载历史并更新本地存储和页面状态（最近20轮对话）
+        try {
+          const updatedHistory = await getMergedDialogueHistory(userId, 40);
+          log(`重新加载历史记录，共 ${updatedHistory.length} 条（最近20轮对话）`, 'debug');
+          
+          const key = `chat_history_${userId}_${deviceId}`;
+          // 只保存当前NPC的历史记录到localStorage
+          const npcHistory = updatedHistory.filter(msg => msg.npc_id === deviceId);
+          localStorage.setItem(key, JSON.stringify(npcHistory));
+          log(`已更新localStorage，当前NPC历史记录 ${npcHistory.length} 条`, 'debug');
+          
+          // 更新页面上的对话记录，显示所有历史记录（包括刚保存的）
+          const formattedMessages = updatedHistory.map(msg => ({
+            text: msg.message,
+            isUser: !msg.is_npc,
+            timestamp: new Date(msg.created_at)
+          }));
+          setConversation(formattedMessages);
+          
+          log(`✅ 已更新页面显示，共 ${formattedMessages.length} 条记录（包括所有NPC）`, 'success');
+        } catch (error) {
+          console.error('更新本地缓存失败:', error);
+          log(`❌ 更新本地缓存失败: ${error instanceof Error ? error.message : '未知错误'}`, 'error');
+        }
+      } else {
+        log('❌ 批量存储聊天记录失败：返回结果为空', 'error');
       }
     } catch (error) {
       console.error('批量存储聊天记录时发生错误:', error);
-      log(`批量存储聊天记录时发生错误: ${error instanceof Error ? error.message : '未知错误'}`, 'error');
+      log(`❌ 批量存储聊天记录时发生错误: ${error instanceof Error ? error.message : '未知错误'}`, 'error');
+    } finally {
+      // 保存完成后，重置保存状态标志
+      setIsSavingConversation(false);
     }
   };
   
@@ -317,6 +400,9 @@ export default function Page() {
   // 使用ref来保存最新的isListening状态，以便在回调中立即访问
   const isListeningRef = useRef(false);
   const audioBuffersRef = useRef<Uint8Array[]>([]);
+  const isSavingConversationRef = useRef(false);
+  const isCallingRef = useRef(false);
+  const userIdRef = useRef<string>('');
   // 监听isListening状态的变化
   useEffect(() => {
     isListeningRef.current = conversationState.isListening;
@@ -326,6 +412,21 @@ export default function Page() {
   useEffect(() => {
     audioBuffersRef.current = conversationState.audioBuffers;
   }, [conversationState.audioBuffers]);
+  
+  // 监听isSavingConversation状态的变化
+  useEffect(() => {
+    isSavingConversationRef.current = isSavingConversation;
+  }, [isSavingConversation]);
+  
+  // 监听isCalling状态的变化
+  useEffect(() => {
+    isCallingRef.current = isCalling;
+  }, [isCalling]);
+  
+  // 监听userId状态的变化
+  useEffect(() => {
+    userIdRef.current = userId;
+  }, [userId]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -402,10 +503,10 @@ export default function Page() {
           const npc = await getNPCById(deviceId);
           if (npc) {
             setNpcInfo(npc);
-            // 如果已登录用户，加载该用户的跨NPC合并历史
+            // 如果已登录用户，加载该用户的跨NPC合并历史（最近20轮对话）
             if (userId) {
               try {
-                const history = await getMergedDialogueHistory(userId);
+                const history = await getMergedDialogueHistory(userId, 40);
                 const formattedMessages = history.map(msg => ({
                   text: msg.message,
                   isUser: !msg.is_npc,
@@ -413,7 +514,7 @@ export default function Page() {
                 }));
                 setConversation(formattedMessages);
                 if (history.length > 0) {
-                  log(`已加载合并历史 ${history.length} 条`, 'info');
+                  log(`已加载合并历史 ${history.length} 条（最近20轮对话）`, 'info');
                 } else {
                   log('该用户暂无历史对话记录，开始新的对话', 'info');
                 }
@@ -437,10 +538,10 @@ export default function Page() {
           const npc = await getCurrentDeviceNPC();
           if (npc) {
             setNpcInfo(npc);
-            // 如果已登录用户，加载该用户的跨NPC合并历史
+            // 如果已登录用户，加载该用户的跨NPC合并历史（最近20轮对话）
             if (userId && npc.id) {
               try {
-                const history = await getMergedDialogueHistory(userId);
+                const history = await getMergedDialogueHistory(userId, 40);
                 const formattedMessages = history.map(msg => ({
                   text: msg.message,
                   isUser: !msg.is_npc,
@@ -448,7 +549,7 @@ export default function Page() {
                 }));
                 setConversation(formattedMessages);
                 if (history.length > 0) {
-                  log(`已加载合并历史 ${history.length} 条`, 'info');
+                  log(`已加载合并历史 ${history.length} 条（最近20轮对话）`, 'info');
                 } else {
                   log('该用户暂无历史对话记录，开始新的对话', 'info');
                 }
@@ -547,15 +648,48 @@ export default function Page() {
     }
   };
 
-  // 结束对话
-  const endConversation = () => {
+  // 结束对话（完全重置，清空所有状态）
+  const endConversation = useCallback(() => {
+    // 如果正在保存对话记录，先等待保存完成
+    if (isSavingConversationRef.current) {
+      log('正在保存对话记录，延迟执行结束对话', 'info');
+      // 等待保存完成后再执行
+      const checkInterval = setInterval(() => {
+        if (!isSavingConversationRef.current) {
+          clearInterval(checkInterval);
+          // 使用 setTimeout 避免递归调用
+          setTimeout(() => {
+            disconnect();
+            setConversation([]);
+            setLogs([]);
+            setShowUserIdModal(true);
+            setUserId('');
+            localStorage.removeItem('userId');
+          }, 0);
+        }
+      }, 100);
+      // 最多等待5秒
+      setTimeout(() => {
+        clearInterval(checkInterval);
+        if (!isSavingConversationRef.current) {
+          disconnect();
+          setConversation([]);
+          setLogs([]);
+          setShowUserIdModal(true);
+          setUserId('');
+          localStorage.removeItem('userId');
+        }
+      }, 5000);
+      return;
+    }
+    
     disconnect();
     setConversation([]);
     setLogs([]);
     setShowUserIdModal(true);
     setUserId('');
     localStorage.removeItem('userId');
-  };
+  }, []);
 
   // ==== 载入 libopus.js 并检查 ====
   useEffect(() => {
@@ -671,9 +805,10 @@ export default function Page() {
         ws.send(JSON.stringify(hello));
 
         // 发送完整历史作为上下文（以 Supabase 合并历史为准）
+        // 只加载最近的20轮对话（40条消息）作为上下文
         try {
           if (userId) {
-            const merged = await getMergedDialogueHistory(userId);
+            const merged = await getMergedDialogueHistory(userId, 40);
             if (merged && merged.length > 0) {
               const historyPayload = {
                 type: 'history',
@@ -685,7 +820,7 @@ export default function Page() {
                 }))
               };
               ws.send(JSON.stringify(historyPayload));
-              log(`已向后端注入历史 ${merged.length} 条`, 'info');
+              log(`已向后端注入历史 ${merged.length} 条（最近20轮对话）`, 'info');
             }
           }
         } catch (e:any) {
@@ -741,7 +876,28 @@ export default function Page() {
         setIsRecording(false);
         if (vizIdRef.current) cancelAnimationFrame(vizIdRef.current);
 
-        endConversation();
+        // 如果正在保存对话记录，不要清空对话记录
+        // 等待保存完成后再决定是否清空（通过检查 isSavingConversationRef 状态）
+        // 这里使用 setTimeout 延迟检查，给保存操作一些时间
+        setTimeout(() => {
+          // 使用 ref 获取最新状态，避免闭包问题
+          const saving = isSavingConversationRef.current;
+          const calling = isCallingRef.current;
+          const currentUserId = userIdRef.current;
+          
+          // 如果保存已完成，且通话已结束，才考虑清空对话记录
+          // 但如果用户还在页面上（userId 还存在），说明是正常结束通话，不应该清空
+          // 只有在真正需要重置整个对话状态时才调用 endConversation
+          if (!saving && !calling) {
+            // 检查是否应该保留对话记录（如果用户ID还存在，说明是正常结束通话，应该保留）
+            if (!currentUserId) {
+              endConversation();
+            } else {
+              // 正常结束通话，只断开连接，不清空对话记录
+              log('通话已正常结束，保留对话记录', 'info');
+            }
+          }
+        }, 1000); // 等待1秒，确保保存操作完成
       };
 
       ws.onerror = (ev: any) => {
@@ -756,7 +912,14 @@ export default function Page() {
             switch (msg.type) {
               case 'hello': {
                 const m = msg as HelloMsg;
-                if (m.session_id) log(`服务器握手成功，会话ID: ${m.session_id}`, 'success');
+                if (m.session_id) {
+                  log(`服务器握手成功，会话ID: ${m.session_id}`, 'success');
+                  // 更新会话ID到状态中
+                  setConversationState(prev => ({
+                    ...prev,
+                    sessionId: m.session_id || prev.sessionId
+                  }));
+                }
                 break;
               }
               case 'tts': {
@@ -1834,17 +1997,17 @@ export default function Page() {
                             const newDeviceId = e.target.value;
                             // 设置新的NPC ID
                             setDeviceId(newDeviceId);
-                            // 加载用户跨NPC的合并历史（以Supabase为准）
+                            // 加载用户跨NPC的合并历史（以Supabase为准，最近20轮对话）
                             if (userId) {
                               try {
-                                const history = await getMergedDialogueHistory(userId);
+                                const history = await getMergedDialogueHistory(userId, 40);
                                 const formatted = history.map(msg => ({
                                   text: msg.message,
                                   isUser: !msg.is_npc,
                                   timestamp: new Date(msg.created_at)
                                 }));
                                 setConversation(formatted);
-                                log(`合并历史 ${formatted.length} 条`, 'info');
+                                log(`合并历史 ${formatted.length} 条（最近20轮对话）`, 'info');
                               } catch (err) {
                                 console.error('加载合并历史失败:', err);
                               }
