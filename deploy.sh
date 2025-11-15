@@ -40,6 +40,7 @@ update_code() {
 #######################################
 replace_config_files() {
   log "Step 1: 拷贝配置文件"
+  cp "$WORK_DIR/xiaozhi-webui/backend/config/config_prod.json" "$WORK_DIR/xiaozhi-webui/backend/config/config.json"
   cp "$WORK_DIR/manage_backend/.env_prod" "$WORK_DIR/manage_backend/.env"
   cp "$WORK_DIR/manage_backend/Dockerfile.prod" "$WORK_DIR/manage_backend/Dockerfile"
   cp "$WORK_DIR/manage_frontend/.env_prod" "$WORK_DIR/manage_frontend/.env"
