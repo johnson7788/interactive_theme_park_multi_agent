@@ -83,10 +83,6 @@ services:
       dockerfile: Dockerfile
     image: local/xiaozhi-webui-proxy:latest
     container_name: xiaozhi-webui-proxy
-    environment:
-      PORT:
-        - "5000"
-        - "8081"
     ports:
       - "23005:5000"                  # ws端口
       - "23004:8081"                  #http端口
