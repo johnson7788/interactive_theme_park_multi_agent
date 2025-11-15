@@ -18,9 +18,11 @@ COPY app/ ./app/
 COPY config/ ./config/
 COPY libs/ ./libs/
 COPY main.py ./
+COPY requirements.txt ./
 
-# 使用 UV 安装项目依赖
-RUN uv sync --frozen --no-dev --default-index https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip install -r requirements.txt -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+# # 使用 UV 安装项目依赖
+# RUN uv sync --frozen --no-dev --default-index https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 暴露端口5000是ws://127.0.0.1:5000， FastAPI 服务器地址: 127.0.0.1:8081
 EXPOSE 5000
