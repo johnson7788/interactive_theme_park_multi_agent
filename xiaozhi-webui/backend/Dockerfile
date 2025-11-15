@@ -32,4 +32,4 @@ EXPOSE 8081
 ENV PYTHONPATH=/app
 
 # 启动应用程序
-CMD ["uv", "run", "main.py"]
+CMD ["python", "main.py"]
