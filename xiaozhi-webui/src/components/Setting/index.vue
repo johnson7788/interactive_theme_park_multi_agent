@@ -18,9 +18,9 @@ const handleQuit = () => {
 <template>
     <div class="setting-panel" :class="{ visible: settingStore.visible }">
         <div class="setting-content">
-            <h2>设置</h2>
+            <h2>设置（本地和远程只需要设置1个）</h2>
             <div style="display: flex; flex-direction: column">
-                <label>OTA地址</label>
+                <label>远程OTA地址</label>
                 <input 
                     v-model="settingStore.otaVersionUrl" 
                     type="text"

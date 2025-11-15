@@ -2,7 +2,7 @@
 # 运行方式
 ```
 pnpm install
-pnmp dev
+pnpm dev   #同时启动了前端和后端
 ```
 修改文件 config/config.json
 注意WS_URL和OTA_VERSION_URL是tour_backend的打印出来的地址

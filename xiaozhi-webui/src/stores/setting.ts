@@ -1,6 +1,17 @@
 import { ref, type Ref } from 'vue'
 import { defineStore } from 'pinia'
 
+// Helper function to read environment variables with defaults
+const getEnvVar = (key: string, defaultValue: string): string => {
+	return import.meta.env[key] || defaultValue
+}
+
+const getEnvVarBoolean = (key: string, defaultValue: boolean): boolean => {
+	const value = import.meta.env[key]
+	if (value === undefined || value === null) return defaultValue
+	return value === 'true' || value === true
+}
+
 type ConfigData = {
 	[key: string]: string | boolean,
 	ws_url: string
@@ -16,12 +27,12 @@ export const useSettingStore = defineStore('setting', () => {
 	// state
 	const sessionId = ref<string>("")
 	const deviceId = ref<string>("")
-	const wsUrl = ref<string>("ws://127.0.0.1:8000/xiaozhi/v1")
-	const wsProxyUrl = ref<string>("ws://127.0.0.1:5000")
-	const otaVersionUrl = ref<string>("http://127.0.0.1:8003/xiaozhi/ota/")
-	const backendUrl = ref<string>("http://127.0.0.1:8081")
-	const tokenEnable = ref<boolean>(true)
-	const token = ref<string>("test_token")
+	const wsUrl = ref<string>(getEnvVar('VITE_WS_URL', 'ws://127.0.0.1:8000/xiaozhi/v1'))
+	const wsProxyUrl = ref<string>(getEnvVar('VITE_WS_PROXY_URL', 'ws://127.0.0.1:5000'))
+	const otaVersionUrl = ref<string>(getEnvVar('VITE_OTA_VERSION_URL', 'http://127.0.0.1:8003/xiaozhi/ota/'))
+	const backendUrl = ref<string>(getEnvVar('VITE_BACKEND_URL', 'http://127.0.0.1:8081'))
+	const tokenEnable = ref<boolean>(getEnvVarBoolean('VITE_TOKEN_ENABLE', true))
+	const token = ref<string>(getEnvVar('VITE_TOKEN', 'test_token'))
 	const visible = ref<boolean>(false)
 	
 	const configRefMap: Record<string, Ref<string | boolean>> = {
