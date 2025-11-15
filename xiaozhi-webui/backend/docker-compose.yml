@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  webui-backend:
+    build: .
+    container_name: xiaozhi-webui-backend
+    ports:
+      - "8000:8000"  # 根据你的实际端口配置修改
+    volumes:
+      - ./config:/app/config  # 挂载配置文件目录
+      - ./logs:/app/logs      # 挂载日志目录
+    environment:
+      - PYTHONPATH=/app
+    restart: unless-stopped
+    networks:
+      - webui-network
+
+networks:
+  webui-network:
+    driver: bridge
