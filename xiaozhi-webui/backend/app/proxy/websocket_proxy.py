@@ -97,7 +97,7 @@ class WebSocketProxy:
 
             # 解析 JSON 数据
             response_data = response.json()
-
+            print(f"_update_ota_address： OTA返回的json数据: {response_data}")
             # 确保 MQTT 信息存在
             if "mqtt" in response_data:
                 logger.debug(f"MQTT 信息已更新:\n{json.dumps(response_data, indent=2, ensure_ascii=False)}")

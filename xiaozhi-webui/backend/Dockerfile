@@ -18,6 +18,7 @@ COPY app/ ./app/
 COPY config/ ./config/
 COPY libs/ ./libs/
 COPY main.py ./
+COPY test ./
 COPY requirements.txt ./
 
 RUN pip install -r requirements.txt -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
