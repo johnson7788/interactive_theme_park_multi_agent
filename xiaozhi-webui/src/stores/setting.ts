@@ -57,12 +57,8 @@ export const useSettingStore = defineStore('setting', () => {
 				const value = data[key]
 				if (value !== undefined && value !== null) {
 					// 本地服务器和本地代理 IP 默认为 localhost
-					if (key === 'ws_proxy_url' && typeof value === 'string') {
-						const backendIp = backendUrl.value.split('://')[1].split(':')[0]
-						ref.value = `ws://${backendIp}` + value.substring(value.lastIndexOf(':'))
-					} else {
-						ref.value = value
-					}
+					console.log("设置：", key, " = ", value)
+					ref.value = value
 				}
 			})
 			return true;

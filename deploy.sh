@@ -63,7 +63,7 @@ replace_config_files() {
 restart_backend_frontend() {
   log "Step 3: 重启前后端容器"
   cd "$WORK_DIR"
-  docker compose down
+#  docker compose down
   docker compose up --build -d
 }
 
