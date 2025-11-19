@@ -341,3 +341,11 @@ vision_handler.py
 注意各种.env文件,详细查看deploy.sh的内容，原理是deploy.sh 调用[docker-compose.yml](docker-compose.yml)部署
 bash deploy.sh
 ```
+
+# 后端
+manage_backend 后台管理端
+1. 用户创建接口，被微信小程序调用
+2. 打卡点配置的事件类型，编辑打开点， 打卡点加上选择主题，编辑打卡点的事件类型关联1个奖励。
+3. 创建奖励，奖励是总的奖励。
+4. 游戏主题管理加上激活选项。
+5. 机器人的prompt动态获取，从内存获取。
