@@ -247,6 +247,39 @@ export const getDialogueHistory = async (userId: string, npcId: string): Promise
   }
 };
 
+// 获取指定NPC的对话历史（按时间升序，可限制条数）
+export const getNpcDialogueHistory = async (
+  userId: string,
+  npcId: string,
+  limit = 40
+): Promise<Dialogue[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('npc_chat_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('npc_id', npcId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+
+    const history: Dialogue[] = (data || []).map((log: any) => ({
+      id: log.id,
+      user_id: log.user_id,
+      npc_id: log.npc_id,
+      message: log.message_content,
+      is_npc: log.sender_type === 'npc',
+      created_at: log.created_at
+    }));
+
+    return history.reverse();
+  } catch (error) {
+    console.error('获取指定NPC对话历史失败:', error);
+    return [];
+  }
+};
+
 // 获取同一用户跨所有NPC的合并聊天历史（以Supabase为准，按时间升序）
 // limit: 可选参数，限制返回的记录数，默认返回最近的20轮对话（40条消息）
 export const getMergedDialogueHistory = async (userId: string, limit?: number): Promise<Dialogue[]> => {

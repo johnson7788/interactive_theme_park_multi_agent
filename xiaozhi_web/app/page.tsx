@@ -15,7 +15,7 @@ import {
   getUserById,
   getDialogueHistory,
   getAllNPCs,
-  getMergedDialogueHistory,
+  getNpcDialogueHistory,
   type NPC,
   type Dialogue
 } from '@/lib/supabase';
@@ -239,22 +239,21 @@ export default function Page() {
       log(`开始保存对话记录，当前对话数量: ${conversation.length}`, 'info');
       
       // 获取已保存的历史记录，用于去重
-      // 为了确保去重准确，加载更多历史记录（最多100条）
+      // 为了确保去重准确，加载更多当前NPC的历史记录（最多100条）
       let existingHistory: Dialogue[] = [];
       try {
-        existingHistory = await getMergedDialogueHistory(userId, 100);
-        log(`已获取历史记录 ${existingHistory.length} 条（用于去重）`, 'debug');
+        existingHistory = await getNpcDialogueHistory(userId, deviceId, 100);
+        log(`已获取当前NPC历史记录 ${existingHistory.length} 条（用于去重）`, 'debug');
       } catch (error) {
         console.error('获取历史记录失败:', error);
         log(`获取历史记录失败: ${error instanceof Error ? error.message : '未知错误'}`, 'warning');
         // 即使获取历史失败，也继续保存新消息
       }
-      
+
       // 创建已存在消息的集合（用于快速查找）
       // 使用更宽松的匹配：只比较消息内容和发送者类型，忽略空格差异
       const existingMessages = new Set(
         existingHistory
-          .filter(msg => msg.npc_id === deviceId)
           .map(msg => {
             const normalizedMsg = (msg.message || '').trim().replace(/\s+/g, ' ');
             return `${normalizedMsg}_${msg.is_npc ? 'npc' : 'user'}`;
@@ -289,16 +288,16 @@ export default function Page() {
       
       if (chatLogs.length === 0) {
         log('没有新消息需要保存（所有消息已存在）', 'info');
-        // 即使没有新消息，也重新加载历史记录以确保页面显示正确（最近20轮对话）
+        // 即使没有新消息，也重新加载当前NPC的历史记录以确保页面显示正确（最近20轮对话）
         try {
-          const updatedHistory = await getMergedDialogueHistory(userId, 40);
+          const updatedHistory = await getNpcDialogueHistory(userId, deviceId, 40);
           const formattedMessages = updatedHistory.map(msg => ({
             text: msg.message,
             isUser: !msg.is_npc,
             timestamp: new Date(msg.created_at)
           }));
           setConversation(formattedMessages);
-          log(`已刷新页面显示，共 ${formattedMessages.length} 条记录（最近20轮对话）`, 'info');
+          log(`已刷新页面显示，共 ${formattedMessages.length} 条记录（当前NPC最近20轮对话）`, 'info');
         } catch (error) {
           console.error('刷新历史记录失败:', error);
         }
@@ -314,26 +313,25 @@ export default function Page() {
       if (result && result.length > 0) {
         log(`✅ 成功批量存储 ${result.length} 条聊天记录`, 'success');
         
-        // 保存成功后，重新加载历史并更新本地存储和页面状态（最近20轮对话）
+        // 保存成功后，重新加载当前NPC的历史并更新本地存储和页面状态（最近20轮对话）
         try {
-          const updatedHistory = await getMergedDialogueHistory(userId, 40);
-          log(`重新加载历史记录，共 ${updatedHistory.length} 条（最近20轮对话）`, 'debug');
-          
+          const updatedHistory = await getNpcDialogueHistory(userId, deviceId, 40);
+          log(`重新加载当前NPC历史记录，共 ${updatedHistory.length} 条（最近20轮对话）`, 'debug');
+
           const key = `chat_history_${userId}_${deviceId}`;
-          // 只保存当前NPC的历史记录到localStorage
-          const npcHistory = updatedHistory.filter(msg => msg.npc_id === deviceId);
-          localStorage.setItem(key, JSON.stringify(npcHistory));
-          log(`已更新localStorage，当前NPC历史记录 ${npcHistory.length} 条`, 'debug');
-          
-          // 更新页面上的对话记录，显示所有历史记录（包括刚保存的）
+          // 保存当前NPC的历史记录到localStorage
+          localStorage.setItem(key, JSON.stringify(updatedHistory));
+          log(`已更新localStorage，当前NPC历史记录 ${updatedHistory.length} 条`, 'debug');
+
+          // 更新页面上的对话记录，只显示当前NPC的历史记录（包括刚保存的）
           const formattedMessages = updatedHistory.map(msg => ({
             text: msg.message,
             isUser: !msg.is_npc,
             timestamp: new Date(msg.created_at)
           }));
           setConversation(formattedMessages);
-          
-          log(`✅ 已更新页面显示，共 ${formattedMessages.length} 条记录（包括所有NPC）`, 'success');
+
+          log(`✅ 已更新页面显示，共 ${formattedMessages.length} 条记录（当前NPC）`, 'success');
         } catch (error) {
           console.error('更新本地缓存失败:', error);
           log(`❌ 更新本地缓存失败: ${error instanceof Error ? error.message : '未知错误'}`, 'error');
@@ -503,10 +501,10 @@ export default function Page() {
           const npc = await getNPCById(deviceId);
           if (npc) {
             setNpcInfo(npc);
-            // 如果已登录用户，加载该用户的跨NPC合并历史（最近20轮对话）
+            // 如果已登录用户，加载该用户与当前NPC的对话历史（最近20轮对话）
             if (userId) {
               try {
-                const history = await getMergedDialogueHistory(userId, 40);
+                const history = await getNpcDialogueHistory(userId, deviceId, 40);
                 const formattedMessages = history.map(msg => ({
                   text: msg.message,
                   isUser: !msg.is_npc,
@@ -514,9 +512,9 @@ export default function Page() {
                 }));
                 setConversation(formattedMessages);
                 if (history.length > 0) {
-                  log(`已加载合并历史 ${history.length} 条（最近20轮对话）`, 'info');
+                  log(`已加载当前NPC历史 ${history.length} 条（最近20轮对话）`, 'info');
                 } else {
-                  log('该用户暂无历史对话记录，开始新的对话', 'info');
+                  log('该用户与当前NPC暂无历史对话记录，开始新的对话', 'info');
                 }
               } catch (error) {
                 console.error('加载对话历史失败:', error);
@@ -538,10 +536,10 @@ export default function Page() {
           const npc = await getCurrentDeviceNPC();
           if (npc) {
             setNpcInfo(npc);
-            // 如果已登录用户，加载该用户的跨NPC合并历史（最近20轮对话）
+            // 如果已登录用户，加载该用户与当前NPC的对话历史（最近20轮对话）
             if (userId && npc.id) {
               try {
-                const history = await getMergedDialogueHistory(userId, 40);
+                const history = await getNpcDialogueHistory(userId, npc.id, 40);
                 const formattedMessages = history.map(msg => ({
                   text: msg.message,
                   isUser: !msg.is_npc,
@@ -549,9 +547,9 @@ export default function Page() {
                 }));
                 setConversation(formattedMessages);
                 if (history.length > 0) {
-                  log(`已加载合并历史 ${history.length} 条（最近20轮对话）`, 'info');
+                  log(`已加载当前NPC历史 ${history.length} 条（最近20轮对话）`, 'info');
                 } else {
-                  log('该用户暂无历史对话记录，开始新的对话', 'info');
+                  log('该用户与当前NPC暂无历史对话记录，开始新的对话', 'info');
                 }
               } catch (error) {
                 console.error('加载对话历史失败:', error);
@@ -804,15 +802,15 @@ export default function Page() {
         const hello = { type: 'hello', device_id: cfg.deviceId, device_name: cfg.deviceName, device_mac: cfg.deviceMac, token: cfg.token, features: { mcp: true } };
         ws.send(JSON.stringify(hello));
 
-        // 发送完整历史作为上下文（以 Supabase 合并历史为准）
+        // 发送当前NPC的历史作为上下文
         // 只加载最近的20轮对话（40条消息）作为上下文
         try {
-          if (userId) {
-            const merged = await getMergedDialogueHistory(userId, 40);
-            if (merged && merged.length > 0) {
+          if (userId && deviceId) {
+            const npcHistory = await getNpcDialogueHistory(userId, deviceId, 40);
+            if (npcHistory && npcHistory.length > 0) {
               const historyPayload = {
                 type: 'history',
-                messages: merged.map(m => ({
+                messages: npcHistory.map(m => ({
                   role: m.is_npc ? 'assistant' : 'user',
                   content: m.message,
                   created_at: m.created_at,
@@ -820,7 +818,7 @@ export default function Page() {
                 }))
               };
               ws.send(JSON.stringify(historyPayload));
-              log(`已向后端注入历史 ${merged.length} 条（最近20轮对话）`, 'info');
+              log(`已向后端注入当前NPC历史 ${npcHistory.length} 条（最近20轮对话）`, 'info');
             }
           }
         } catch (e:any) {
@@ -1997,19 +1995,21 @@ export default function Page() {
                             const newDeviceId = e.target.value;
                             // 设置新的NPC ID
                             setDeviceId(newDeviceId);
-                            // 加载用户跨NPC的合并历史（以Supabase为准，最近20轮对话）
+                            // 加载用户与新NPC的对话历史（以Supabase为准，最近20轮对话）
                             if (userId) {
                               try {
-                                const history = await getMergedDialogueHistory(userId, 40);
+                                const history = await getNpcDialogueHistory(userId, newDeviceId, 40);
                                 const formatted = history.map(msg => ({
                                   text: msg.message,
                                   isUser: !msg.is_npc,
                                   timestamp: new Date(msg.created_at)
                                 }));
                                 setConversation(formatted);
-                                log(`合并历史 ${formatted.length} 条（最近20轮对话）`, 'info');
+                                log(`加载新NPC历史 ${formatted.length} 条（最近20轮对话）`, 'info');
                               } catch (err) {
-                                console.error('加载合并历史失败:', err);
+                                console.error('加载新NPC历史失败:', err);
+                                // 如果加载失败，清空对话记录
+                                setConversation([]);
                               }
                             }
                             // 自动切换并重连
@@ -2043,6 +2043,7 @@ export default function Page() {
                         />
                         <button
                           onClick={() => {
+                            endCall();
                             if (deviceId && wsRef.current) {
                               disconnect();
                               setTimeout(() => connect(), 500);
