@@ -101,14 +101,9 @@ export class ChatStateManager {
                 this.emit(ChatEvent.AI_STOP_SPEAKING)
             },
             handleAudioLevel: (audioLevel: number) => {
-                if (audioLevel > this.deps.thresholds.USER_INTERRUPT_AI) {
-                    const abortMessage: AbortMessage = {
-                        type: "abort",
-                        session_id: this.deps.callbacks.getSessionId(),
-                    };
-                    this.deps.callbacks.sendTextData(abortMessage);
-                    this.setState(ChatState.USER_SPEAKING);
-                }
+                // 在 AI 播放音频时，不处理用户输入，不允许打断
+                // 用户输入处理已在 App.vue 的 onProcess 回调中被阻止
+                console.log("[ChatStateManager][AI_SPEAKING.handleAudioLevel] AI is speaking, ignoring user input");
             },
         })
     }

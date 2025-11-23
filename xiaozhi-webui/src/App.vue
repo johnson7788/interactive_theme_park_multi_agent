@@ -45,9 +45,16 @@ audioService.onQueueEmpty(() => {
   chatStateManager.setState(ChatState.IDLE);
 })
 audioService.onProcess((audioLevel: number, audioData: Float32Array) => {
+  // 如果 AI 正在播放音频，则忽略用户输入，不处理音频数据
+  if (audioService.isPlaying()) {
+    console.log("[App][onProcess] AI is playing audio, ignoring user input");
+    return;
+  }
   chatStateManager.handleUserAudioLevel(audioLevel, audioData);
 })
 chatStateManager.on(ChatEvent.USER_START_SPEAKING, async () => {
+  // 注意：由于在 onProcess 中已经阻止了用户输入处理，这里理论上不应该被触发
+  // 但为了安全起见，仍然保留停止播放的逻辑
   audioService.stopPlaying();
   audioService.clearAudioQueue();
 })

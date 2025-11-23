@@ -10,6 +10,7 @@ export class AudioService {
   private _sourceNode: AudioBufferSourceNode | null = null;
   private _audioQueue: AudioBuffer[] = [];
   private _onQueueEmpty: (() => void) | null = null;
+  private _isPlaying: boolean = false;
 
   private constructor() {
     this._audioContext = new (window.AudioContext || window.webkitAudioContext)({
@@ -63,13 +64,24 @@ export class AudioService {
     this._onProcess = callback;
   }
 
+  /**
+   * 检查是否正在播放音频
+   * @returns {boolean} 是否正在播放
+   */
+  public isPlaying(): boolean {
+    return this._isPlaying;
+  }
+
   public playAudio = async () => {
     if (this._audioQueue.length === 0) {
       console.log("[AudioManager][playAudio] Audio queue is empty.");
+      this._isPlaying = false;
       this._onQueueEmpty?.();
       return;
     }
 
+    // 标记开始播放
+    this._isPlaying = true;
     const audioBuffer: AudioBuffer = this._audioQueue.shift() as AudioBuffer;
 
     // 创建播放节点
@@ -78,6 +90,10 @@ export class AudioService {
     this._sourceNode.connect(this._audioContext.destination);
     this._sourceNode.onended = () => {
       this._sourceNode!.disconnect();
+      // 如果队列为空，标记为未播放状态
+      if (this._audioQueue.length === 0) {
+        this._isPlaying = false;
+      }
       this.playAudio();
     };
     this._sourceNode.start();
@@ -89,6 +105,7 @@ export class AudioService {
       this._sourceNode.disconnect();
       this._sourceNode = null;
     }
+    this._isPlaying = false;
   };
 
   private loadAudioWorklet = async () => {
@@ -203,6 +220,7 @@ export class AudioService {
 
   public clearAudioQueue = () => {
     this._audioQueue = [];
+    this._isPlaying = false;
   }
 
   public clearAudioStream = () => {
