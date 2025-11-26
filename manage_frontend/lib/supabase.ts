@@ -30,7 +30,7 @@ export type TaskTemplate = {
   id: string;
   name: string;
   type: string;
-  game_theme_id: string;
+  game_theme_id: string | null;
   rewards: any;
   trigger_conditions: any;
   content: string;

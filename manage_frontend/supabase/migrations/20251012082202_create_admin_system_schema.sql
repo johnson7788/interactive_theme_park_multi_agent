@@ -8,7 +8,7 @@
   - `name` (text) - 游戏名称
   - `description` (text) - 游戏描述
   - `scene_count` (integer) - 场景数量
-  - `status` (text) - 状态: 进行中/已完成/草稿
+  - `status` (text) - 状态: 已启用/未启用/草稿
   - `created_at` (timestamptz)
   - `updated_at` (timestamptz)
 

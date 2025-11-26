@@ -1,7 +1,14 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { supabase, type Checkpoint, type NPCCharacter } from '@/lib/supabase';
+import {
+  supabase,
+  type Checkpoint,
+  type GameTheme,
+  type NPCCharacter,
+  type TaskTemplate,
+  type Reward,
+} from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -24,6 +31,9 @@ export default function CheckpointsPage() {
   const [loading, setLoading] = useState(true);
   const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
+  const [currentTheme, setCurrentTheme] = useState<GameTheme | null>(null);
+  const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
+  const [rewards, setRewards] = useState<Reward[]>([]);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -31,7 +41,7 @@ export default function CheckpointsPage() {
     position_x: 0,
     position_y: 0,
     npc_id: '',
-    event_config: { type: '问答', description: '' },
+    event_config: { task_template_id: '', reward_id: '', description: '' },
   });
 
   useEffect(() => {
@@ -62,16 +72,30 @@ export default function CheckpointsPage() {
 
   const fetchData = async () => {
     try {
-      const [checkpointsRes, npcsRes] = await Promise.all([
+      const [checkpointsRes, npcsRes, themeRes, tasksRes, rewardsRes] = await Promise.all([
         supabase.from('checkpoints').select('*').order('created_at', { ascending: false }),
         supabase.from('npc_characters').select('*'),
+        supabase
+          .from('game_themes')
+          .select('*')
+          .eq('status', '已启用')
+          .order('updated_at', { ascending: false })
+          .limit(1),
+        supabase.from('task_templates').select('*').order('created_at', { ascending: false }),
+        supabase.from('rewards').select('*').order('created_at', { ascending: false }).eq('status', '启用'),
       ]);
 
       if (checkpointsRes.error) throw checkpointsRes.error;
       if (npcsRes.error) throw npcsRes.error;
+      if (themeRes.error) throw themeRes.error;
+      if (tasksRes.error) throw tasksRes.error;
+      if (rewardsRes.error) throw rewardsRes.error;
 
       setCheckpoints(checkpointsRes.data || []);
       setNpcs(npcsRes.data || []);
+      setCurrentTheme(themeRes.data?.[0] || null);
+      setTaskTemplates(tasksRes.data || []);
+      setRewards(rewardsRes.data || []);
     } catch (error) {
       toast.error('加载数据失败');
     } finally {
@@ -121,13 +145,18 @@ export default function CheckpointsPage() {
 
   const handleSelectCheckpoint = (checkpoint: Checkpoint) => {
     setSelectedCheckpoint(checkpoint);
+    const eventConfig = checkpoint.event_config || {};
     setFormData({
       name: checkpoint.name,
       area: checkpoint.area,
       position_x: checkpoint.position_x,
       position_y: checkpoint.position_y,
       npc_id: checkpoint.npc_id,
-      event_config: checkpoint.event_config || { type: '问答', description: '' },
+      event_config: {
+        task_template_id: eventConfig.task_template_id || eventConfig.task_id || '',
+        reward_id: eventConfig.reward_id || '',
+        description: eventConfig.description || eventConfig.detail || '',
+      },
     });
   };
 
@@ -139,15 +168,23 @@ export default function CheckpointsPage() {
       position_x: 0,
       position_y: 0,
       npc_id: '',
-      event_config: { type: '问答', description: '' },
+      event_config: { task_template_id: '', reward_id: '', description: '' },
     });
   };
 
   return (
     <div className="flex h-full">
       <div className="flex-1 p-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">打卡点配置</h1>
+        <div className="mb-8 space-y-2">
+          <div className="flex flex-wrap items-center gap-4">
+            <h1 className="text-3xl font-bold text-foreground">打卡点配置</h1>
+            <div className="inline-flex items-center gap-3 rounded-full border px-4 py-1.5 text-base">
+              <span className="text-muted-foreground">当前游戏主题</span>
+              <span className="font-semibold text-lg text-foreground">
+                {currentTheme ? currentTheme.name : '暂无启用主题'}
+              </span>
+            </div>
+          </div>
           <p className="mt-2 text-muted-foreground">
             在地图上配置打卡点位置和事件
           </p>
@@ -328,23 +365,62 @@ export default function CheckpointsPage() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="event_type">事件类型</Label>
+            <Label htmlFor="task_template_id">关联任务模板</Label>
             <Select
-              value={formData.event_config.type}
+              value={formData.event_config.task_template_id}
               onValueChange={(value) =>
                 setFormData({
                   ...formData,
-                  event_config: { ...formData.event_config, type: value },
+                  event_config: { ...formData.event_config, task_template_id: value },
                 })
               }
             >
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder="选择任务模板" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="问答">问答</SelectItem>
-                <SelectItem value="采集">采集</SelectItem>
-                <SelectItem value="导流">导流</SelectItem>
+                {taskTemplates.length === 0 ? (
+                  <SelectItem value="no_task_templates" disabled>
+                    暂无任务模板
+                  </SelectItem>
+                ) : (
+                  taskTemplates.map((task) => (
+                    <SelectItem key={task.id} value={task.id}>
+                      {task.name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="reward_id">奖励配置</Label>
+            <Select
+              value={formData.event_config.reward_id}
+              onValueChange={(value) =>
+                setFormData({
+                  ...formData,
+                  event_config: { ...formData.event_config, reward_id: value === 'none' ? '' : value },
+                })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="选择奖励" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">无奖励</SelectItem>
+                {rewards.length === 0 ? (
+                  <SelectItem value="no_rewards" disabled>
+                    暂无可用奖励
+                  </SelectItem>
+                ) : (
+                  rewards.map((reward) => (
+                    <SelectItem key={reward.id} value={reward.id}>
+                      {reward.name}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
           </div>
