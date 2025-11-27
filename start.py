@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TrainPPTAgent dev环境一键启动脚本，生产环境需要使用npm run build或者docker
+dev环境一键启动脚本，生产环境需要使用npm run build或者docker
 支持前端构建、后端服务启动、进程管理和监控
 """
 
@@ -156,7 +156,7 @@ class MultiLogTailer:
 class ProductionStarter:
     def __init__(self):
         self.project_root = Path(__file__).parent
-        self.backend_dir = self.project_root / 'backend'
+        self.backend_dir = self.project_root
         self.frontend_dir = self.project_root / 'frontend'
         self.dist_dir = self.frontend_dir / 'dist'
         self.logs_dir = self.project_root / 'logs'
@@ -170,30 +170,18 @@ class ProductionStarter:
             sys.exit(1)
 
         self.services = {
-            'main_api': {
-                'port': int(os.environ.get('MAIN_API_PORT', '6800')),
-                'dir': self.backend_dir / 'main_api',
+            'manage_backend': {
+                'port': int(os.environ.get('MAIN_API_PORT', '8000')),
+                'dir': self.backend_dir / 'main.py',
                 'script': 'main.py',
                 'name': '主API服务'
             },
-            'outline': {
-                'port': int(os.environ.get('OUTLINE_API_PORT', '10001')),
-                'dir': self.backend_dir / 'simpleOutline',
+            'tour_backend': {
+                'port': int(os.environ.get('TOUR_BACKEND_PORT', '8003')),
+                'dir': self.backend_dir / 'tour_backend',
                 'script': 'main_api.py',
-                'name': '大纲生成服务'
+                'name': '小智后端'
             },
-            'content': {
-                'port': int(os.environ.get('CONTENT_API_PORT', '10011')),
-                'dir': self.backend_dir / 'slide_agent',
-                'script': 'main_api.py',
-                'name': '内容生成服务'
-            },
-            'personal_db': {
-                'port': int(os.environ.get('PERSONALDB_PORT', '9100')),
-                'dir': self.backend_dir / 'personaldb',
-                'script': 'main.py',
-                'name': '知识库'
-            }
         }
 
         self.frontend_port = int(os.environ.get('FRONTEND_PORT', '5173'))

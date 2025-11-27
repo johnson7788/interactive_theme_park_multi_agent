@@ -18,7 +18,7 @@ class CreateUserAPITestCase(unittest.TestCase):
     测试 create_user 接口
     """
     host = "127.0.0.1"
-    port = 8000
+    port = 8200
 
     env_host = os.environ.get("host")
     if env_host:

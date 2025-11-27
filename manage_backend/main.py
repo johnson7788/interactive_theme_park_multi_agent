@@ -45,4 +45,4 @@ async def create_user(req: CreateUserRequest):
     return {"message": "User created successfully", "user": result.data[0]}
 
 if __name__ == '__main__':
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8200)

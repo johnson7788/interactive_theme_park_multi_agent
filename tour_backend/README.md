@@ -236,7 +236,6 @@ OTA接口是		http://127.0.0.1:8003/xiaozhi/ota/
 视觉分析接口是	http://198.18.0.1:8003/mcp/vision/explain
 Websocket地址是	ws://127.0.0.1:8000/xiaozhi/v1/
 
-
 # Prompt这2个
 data/.config.yaml
 agent-base-prompt.txt
