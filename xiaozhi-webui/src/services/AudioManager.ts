@@ -11,6 +11,7 @@ export class AudioService {
   private _audioQueue: AudioBuffer[] = [];
   private _onQueueEmpty: (() => void) | null = null;
   private _isPlaying: boolean = false;
+  private _isUserInputEnabled: boolean = true;
 
   private constructor() {
     this._audioContext = new (window.AudioContext || window.webkitAudioContext)({
@@ -190,7 +191,7 @@ export class AudioService {
       return;
     }
     this._userMediaNode.connect(this._processorNode);
-    this._audioStream.getTracks().forEach((track) => (track.enabled = true));
+    this._setUserInputEnabled(this._isUserInputEnabled);
 
     if (this._audioContext.state === "suspended") {
       await this._audioContext.resume();
@@ -253,5 +254,26 @@ export class AudioService {
     this.clearAudioStream();
     this.clearUserMediaNode();
     this.clearProcessorNode();
+  };
+
+  private _setUserInputEnabled = (enabled: boolean) => {
+    this._isUserInputEnabled = enabled;
+    if (this._audioStream) {
+      this._audioStream.getTracks().forEach((track) => {
+        track.enabled = enabled;
+      });
+    }
+  };
+
+  public disableUserInput = () => {
+    if (!this._isUserInputEnabled) return;
+    console.log("[AudioManager][disableUserInput] Muting user microphone input.");
+    this._setUserInputEnabled(false);
+  };
+
+  public enableUserInput = () => {
+    if (this._isUserInputEnabled) return;
+    console.log("[AudioManager][enableUserInput] Restoring user microphone input.");
+    this._setUserInputEnabled(true);
   };
 }
