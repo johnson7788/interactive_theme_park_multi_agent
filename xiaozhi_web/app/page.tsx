@@ -883,7 +883,18 @@ export default function Page() {
           const calling = isCallingRef.current;
           const currentUserId = userIdRef.current;
 
-          endConversation();
+          // 如果保存已完成，且通话已结束，才考虑清空对话记录
+          // 但如果用户还在页面上（userId 还存在），说明是正常结束通话，不应该清空
+          // 只有在真正需要重置整个对话状态时才调用 endConversation
+          if (!saving && !calling) {
+            // 检查是否应该保留对话记录（如果用户ID还存在，说明是正常结束通话，应该保留）
+            if (!currentUserId) {
+              endConversation();
+            } else {
+              // 正常结束通话，只断开连接，不清空对话记录
+              log('通话已正常结束，保留对话记录', 'info');
+            }
+          }
         }, 1000); // 等待1秒，确保保存操作完成
       };
 
