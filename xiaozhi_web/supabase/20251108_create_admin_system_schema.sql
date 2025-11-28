@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS npc_characters (
   avatar_url text,
   personality text DEFAULT '活泼',
   dialogue_template jsonb DEFAULT '[]'::jsonb,
+  prompt text,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
@@ -221,4 +222,3 @@ CREATE INDEX IF NOT EXISTS idx_ai_stories_theme ON ai_stories(game_theme_id);
 CREATE INDEX IF NOT EXISTS idx_npc_chat_logs_npc_user ON npc_chat_logs(npc_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_npc_chat_logs_session ON npc_chat_logs(session_id);
 CREATE INDEX IF NOT EXISTS idx_npc_chat_logs_created_at ON npc_chat_logs(created_at);
-

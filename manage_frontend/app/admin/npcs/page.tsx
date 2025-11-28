@@ -29,6 +29,7 @@ export default function NPCsPage() {
     avatar_url: '',
     personality: '活泼',
     dialogue_template: [] as string[],
+    prompt: '',
   });
 
   useEffect(() => {
@@ -92,6 +93,7 @@ export default function NPCsPage() {
       avatar_url: npc.avatar_url,
       personality: npc.personality,
       dialogue_template: npc.dialogue_template || [],
+      prompt: npc.prompt || '',
     });
   };
 
@@ -103,6 +105,7 @@ export default function NPCsPage() {
       avatar_url: '',
       personality: '活泼',
       dialogue_template: [],
+      prompt: ''
     });
   };
 
@@ -246,6 +249,25 @@ export default function NPCsPage() {
                   </p>
                 </div>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="prompt">角色提示词</Label>
+              <Textarea
+                id="prompt"
+                value={formData.prompt}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    prompt: e.target.value,
+                  })
+                }
+                placeholder="输入角色提示词，用于指导AI生成更符合角色设定的对话"
+                rows={4}
+              />
+              <p className="text-xs text-muted-foreground">
+                角色提示词将用于指导AI生成更符合角色设定的对话内容
+              </p>
             </div>
 
             <div className="space-y-2">

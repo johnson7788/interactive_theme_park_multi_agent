@@ -22,6 +22,7 @@ export type NPCCharacter = {
   avatar_url: string;
   personality: string;
   dialogue_template: any;
+  prompt: string;
   created_at: string;
   updated_at: string;
 };
