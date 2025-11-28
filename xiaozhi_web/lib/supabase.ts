@@ -12,6 +12,7 @@ export type NPC = {
   avatar_url: string;
   personality: string;
   description: string;
+  prompt?: string; // NPC的提示词字段
   created_at: string;
   updated_at: string;
 };

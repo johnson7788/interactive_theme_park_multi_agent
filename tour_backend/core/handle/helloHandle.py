@@ -46,6 +46,21 @@ async def handleHelloMessage(conn, msg_json):
         conn.logger.bind(tag=TAG).info(f"客户端音频格式: {format}")
         conn.audio_format = format
         conn.welcome_msg["audio_params"] = audio_params
+    
+    # 处理NPC信息
+    npc_info = msg_json.get("npc_info")
+    if npc_info:
+        conn.logger.bind(tag=TAG).info(f"收到NPC信息: {npc_info}")
+        # 保存NPC信息到连接对象中
+        conn.npc_info = npc_info
+        # 如果有prompt字段，可以直接用于设置系统提示词
+        if npc_info.get("prompt"):
+            conn.logger.bind(tag=TAG).info(f"设置NPC提示词: {npc_info['prompt']}")
+            conn.prompt = npc_info["prompt"]
+            # 如果对话管理器存在，可以更新系统消息
+            if hasattr(conn, 'dialogue') and hasattr(conn.dialogue, 'update_system_message'):
+                conn.dialogue.update_system_message(npc_info["prompt"])
+    
     features = msg_json.get("features")
     if features:
         conn.logger.bind(tag=TAG).info(f"客户端特性: {features}")

@@ -799,7 +799,21 @@ export default function Page() {
         setWsOk(true);
         log('WS 已连接', 'success');
         // 发送 hello
-        const hello = { type: 'hello', device_id: cfg.deviceId, device_name: cfg.deviceName, device_mac: cfg.deviceMac, token: cfg.token, features: { mcp: true } };
+        // 构建hello消息，包含NPC基本信息
+        const hello = {
+          type: 'hello', 
+          device_id: cfg.deviceId, 
+          device_name: cfg.deviceName, 
+          device_mac: cfg.deviceMac, 
+          token: cfg.token, 
+          features: { mcp: true },
+          // 发送NPC基本信息
+          npc_info: npcInfo ? {
+            id: npcInfo.id,
+            name: npcInfo.name,
+            prompt: npcInfo.prompt // 发送NPC的提示词
+          } : null
+        };
         ws.send(JSON.stringify(hello));
 
         // 发送当前NPC的历史作为上下文
