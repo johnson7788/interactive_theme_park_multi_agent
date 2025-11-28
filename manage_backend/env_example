@@ -1,24 +1,2 @@
-# ===== Server =====
-APP_NAME="Aplaon Admin API"
-APP_ENV=dev
-APP_DEBUG=true
-APP_HOST=0.0.0.0
-APP_PORT=8000
-ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-
-# ===== Database (MySQL 8.x) =====
-# 示例：mysql+asyncmy://user:pass@host:3306/dbname
-DATABASE_URL=mysql+asyncmy://root:rootpassword@db:3306/aplaon
-
-# ===== JWT =====
-JWT_SECRET=change_me_please_very_secret
-JWT_ALG=HS256
-JWT_EXPIRE_MINUTES=120
-
-# ===== AI Config =====
-AI_PROVIDER=local    # 可选: local / openai
-AI_MODEL=gpt-4o-mini # openai时生效
-OPENAI_API_KEY=      # 如需使用openai请填写
-
-# ===== Static Uploads =====
-UPLOAD_DIR=./uploads
+SUPABASE_URL=https://xxxxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=x.xx.xxx

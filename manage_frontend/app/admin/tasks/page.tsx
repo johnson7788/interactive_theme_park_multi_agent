@@ -106,7 +106,7 @@ export default function TasksPage() {
     setFormData({
       name: task.name,
       type: task.type,
-      game_theme_id: task.game_theme_id,
+      game_theme_id: task.game_theme_id ?? '',
       content: task.content,
       rewards: task.rewards,
       trigger_conditions: task.trigger_conditions,

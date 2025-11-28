@@ -30,6 +30,16 @@ import {
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Plus, Search, Pencil, Trash2 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 
 export default function ThemesPage() {
@@ -44,6 +54,7 @@ export default function ThemesPage() {
     scene_count: 0,
     status: '草稿',
   });
+  const [pendingTheme, setPendingTheme] = useState<GameTheme | null>(null);
 
   useEffect(() => {
     fetchThemes();
@@ -120,6 +131,53 @@ export default function ThemesPage() {
     } catch (error) {
       toast.error('删除失败');
     }
+  };
+
+  const handleToggleEnable = async (theme: GameTheme) => {
+    const isEnabled = theme.status === '已启用';
+    const now = new Date().toISOString();
+
+    try {
+      if (isEnabled) {
+        const { error } = await supabase
+          .from('game_themes')
+          .update({ status: '未启用', updated_at: now })
+          .eq('id', theme.id);
+
+        if (error) throw error;
+        toast.success('已将主题设为未启用');
+      } else {
+        const { error: resetError } = await supabase
+          .from('game_themes')
+          .update({ status: '未启用', updated_at: now })
+          .eq('status', '已启用');
+
+        if (resetError) throw resetError;
+
+        const { error } = await supabase
+          .from('game_themes')
+          .update({ status: '已启用', updated_at: now })
+          .eq('id', theme.id);
+
+        if (error) throw error;
+        toast.success('已启用该主题');
+      }
+
+      fetchThemes();
+    } catch (error: any) {
+      toast.error(error?.message || '切换启用状态失败');
+    }
+  };
+
+  const handleStatusClick = (theme: GameTheme) => {
+    if (theme.status === '已启用') return;
+    setPendingTheme(theme);
+  };
+
+  const handleConfirmEnable = async () => {
+    if (!pendingTheme) return;
+    await handleToggleEnable(pendingTheme);
+    setPendingTheme(null);
   };
 
   const resetForm = () => {
@@ -234,8 +292,8 @@ export default function ThemesPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="草稿">草稿</SelectItem>
-                      <SelectItem value="进行中">进行中</SelectItem>
-                      <SelectItem value="已完成">已完成</SelectItem>
+                      <SelectItem value="未启用">未启用</SelectItem>
+                      <SelectItem value="已启用">已启用</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -279,13 +337,20 @@ export default function ThemesPage() {
                     <TableCell>{theme.scene_count}</TableCell>
                     <TableCell>
                       <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          theme.status === '进行中'
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition ${
+                          theme.status === '已启用'
                             ? 'bg-green-100 text-green-800'
-                            : theme.status === '已完成'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-gray-100 text-gray-800'
+                            : 'cursor-pointer hover:shadow-sm'
+                        } ${
+                          theme.status === '未启用'
+                            ? 'bg-amber-100 text-amber-800'
+                            : theme.status === '草稿'
+                            ? 'bg-gray-100 text-gray-800'
+                            : ''
                         }`}
+                        role="button"
+                        onClick={() => handleStatusClick(theme)}
+                        title={theme.status === '已启用' ? '当前主题已启用' : '点击启用主题'}
                       >
                         {theme.status}
                       </span>
@@ -318,6 +383,22 @@ export default function ThemesPage() {
           </Table>
         </div>
       </Card>
+      <AlertDialog open={!!pendingTheme} onOpenChange={(open) => !open && setPendingTheme(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>启用主题</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingTheme
+                ? `确认将「${pendingTheme.name}」设为已启用吗？启用后会自动关闭其他主题。`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmEnable}>确认启用</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

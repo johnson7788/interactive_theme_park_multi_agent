@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 export default function StoriesPage() {
   const [themes, setThemes] = useState<GameTheme[]>([]);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [inputData, setInputData] = useState({
     theme_name: '',
     game_theme_id: '',
@@ -100,8 +101,10 @@ export default function StoriesPage() {
       return;
     }
 
+    setSaving(true);
+
     try {
-      const { error } = await supabase.from('ai_stories').insert([
+      const { error: storyError } = await supabase.from('ai_stories').insert([
         {
           game_theme_id: inputData.game_theme_id || null,
           title: outputData.title,
@@ -110,10 +113,30 @@ export default function StoriesPage() {
         },
       ]);
 
-      if (error) throw error;
-      toast.success('故事已保存');
+      if (storyError) throw storyError;
+
+      if (outputData.generated_tasks.length > 0) {
+        const tasksToInsert = outputData.generated_tasks.map((task) => ({
+          name: task.name,
+          type: task.type,
+          game_theme_id: inputData.game_theme_id || null,
+          content: task.description,
+          rewards: task.rewards || {},
+          trigger_conditions: task.trigger_conditions || {},
+        }));
+
+        const { error: taskError } = await supabase
+          .from('task_templates')
+          .insert(tasksToInsert);
+
+        if (taskError) throw taskError;
+      }
+
+      toast.success('故事与任务模板已发布');
     } catch (error) {
-      toast.error('保存失败');
+      toast.error('发布失败，请重试');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -224,9 +247,15 @@ export default function StoriesPage() {
           <div className="mb-6 flex items-center justify-between">
             <h2 className="text-xl font-semibold">生成结果</h2>
             {outputData.story_content && (
-              <Button onClick={handleSave} variant="outline" size="sm" className="gap-2">
+              <Button
+                onClick={handleSave}
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                disabled={saving}
+              >
                 <Save className="h-4 w-4" />
-                保存并发布
+                {saving ? '发布中...' : '保存并发布'}
               </Button>
             )}
           </div>

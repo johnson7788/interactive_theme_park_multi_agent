@@ -235,3 +235,27 @@ tour_backend/
 OTA接口是		http://127.0.0.1:8003/xiaozhi/ota/
 视觉分析接口是	http://198.18.0.1:8003/mcp/vision/explain
 Websocket地址是	ws://127.0.0.1:8000/xiaozhi/v1/
+
+# Prompt这2个
+data/.config.yaml
+agent-base-prompt.txt
+
+
+# 动态prompt更新
+连接小智websocket的时候self.config传入prompt即可
+core/websocket_server.py
+        # 创建ConnectionHandler时传入当前server实例
+        handler = ConnectionHandler(
+            self.config,
+            self._vad,
+            self._asr,
+            self._llm,
+            self._memory,
+            self._intent,
+            self,  # 传入server实例
+        )
+        self.active_connections.add(handler)
+
+core/connection.py
+            if self.config.get("prompt") is not None:
+                user_prompt = self.config["prompt"]

@@ -15,7 +15,6 @@ services:
 #    restart: unless-stopped
 #    networks:
 #      - app-net
-    # depends_on:                     # 若需要等别的服务就绪再启动，在这里加
 
   # 2) 前端（Next.js，作为总管理台）
   manage_frontend:

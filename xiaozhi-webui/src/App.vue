@@ -59,7 +59,11 @@ chatStateManager.on(ChatEvent.USER_START_SPEAKING, async () => {
   audioService.clearAudioQueue();
 })
 chatStateManager.on(ChatEvent.AI_START_SPEAKING, () => {
+  audioService.disableUserInput();
   audioService.playAudio();
+})
+chatStateManager.on(ChatEvent.AI_STOP_SPEAKING, () => {
+  audioService.enableUserInput();
 })
 // ---------- 语音对话配置 end ----------------
 
