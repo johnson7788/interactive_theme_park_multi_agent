@@ -95,7 +95,7 @@ class ASRProvider(ASRProviderBase):
                 result = self.model.generate(
                     input=combined_pcm_data,
                     cache={},
-                    language="auto",
+                    language="zh", # 如果需要识别任意语言，改为"auto"
                     use_itn=True,
                     batch_size_s=60,
                 )
